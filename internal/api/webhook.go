@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/KrishKoria/Webhook-Delivery-Service/internal/cache"
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/database"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -15,6 +16,7 @@ import (
 
 type WebhookHandler struct {
     Queries *database.Queries
+    Cache   *cache.SubscriptionCache
 }
 
 // RegisterWebhookRoutes registers the webhook ingestion endpoint.
@@ -24,14 +26,25 @@ func RegisterWebhookRoutes(r *gin.Engine, h *WebhookHandler) {
 
 func (h *WebhookHandler) IngestWebhook(c *gin.Context) {
     subID := c.Param("subscription_id")
+    var sub database.Subscription
+    var ok bool
 
+    if sub, ok = h.Cache.Get(subID); !ok {
+        var err error
+        sub, err = h.Queries.GetSubscription(c, subID)
+        if err != nil {
+            c.JSON(http.StatusNotFound, gin.H{"error": "subscription not found"})
+            return
+        }
+        h.Cache.Set(subID, sub)
+    }
     body, err := io.ReadAll(c.Request.Body)
     if err != nil {
         c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
         return
     }
 
-    sub, err := h.Queries.GetSubscription(context.Background(), subID)
+    sub, err = h.Queries.GetSubscription(context.Background(), subID)
     if err != nil {
         c.JSON(http.StatusNotFound, gin.H{"error": "subscription not found"})
         return

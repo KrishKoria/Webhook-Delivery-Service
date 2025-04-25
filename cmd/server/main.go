@@ -4,8 +4,10 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/api"
+	"github.com/KrishKoria/Webhook-Delivery-Service/internal/cache"
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/database"
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/db"
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/delivery"
@@ -24,6 +26,10 @@ func main() {
     r.GET("/healthz", func(c *gin.Context) {
         c.JSON(http.StatusOK, gin.H{"status": "ok"})
     })
+
+    subCache := cache.NewSubscriptionCache(5 * time.Minute) // 5 min TTL
+
+
     subHandler := &api.SubscriptionHandler{
         Queries: queries,
     }
@@ -32,13 +38,13 @@ func main() {
     analyticsHandler := &api.AnalyticsHandler{Queries: queries}
     api.RegisterAnalyticsRoutes(r, analyticsHandler)
 
-    webhookHandler := &api.WebhookHandler{Queries: queries}
+    webhookHandler := &api.WebhookHandler{Queries: queries, Cache: subCache}
     api.RegisterWebhookRoutes(r, webhookHandler)
 
     uiHandler := &api.UIHandler{Queries: queries}
     api.RegisterUIRoutes(r, uiHandler)
 
-    worker := delivery.NewWorker(queries)
+    worker := delivery.NewWorker(queries, subCache)
     go worker.Start(context.Background())
     cleanupWorker := delivery.NewCleanupWorker(queries)
     go cleanupWorker.Start(context.Background())

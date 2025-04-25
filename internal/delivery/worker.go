@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/KrishKoria/Webhook-Delivery-Service/internal/cache"
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/database"
 	"github.com/google/uuid"
 )
@@ -18,10 +19,11 @@ const (
 
 type Worker struct {
     Queries *database.Queries
+    Cache  *cache.SubscriptionCache
 }
 
-func NewWorker(queries *database.Queries) *Worker {
-    return &Worker{Queries: queries}
+func NewWorker(queries *database.Queries, cache *cache.SubscriptionCache) *Worker {
+    return &Worker{Queries: queries, Cache: cache}
 }
 
 func (w *Worker) Start(ctx context.Context) {
@@ -46,10 +48,15 @@ func (w *Worker) processPendingTasks(ctx context.Context) {
     }
 
     for _, task := range tasks {
-        sub, err := w.Queries.GetSubscription(ctx, task.SubscriptionID)
-        if err != nil {
-            log.Printf("error fetching subscription for task %s: %v", task.ID, err)
-            continue
+        var sub database.Subscription
+        var ok bool
+        if sub, ok = w.Cache.Get(task.SubscriptionID); !ok {
+            sub, err = w.Queries.GetSubscription(ctx, task.SubscriptionID)
+            if err != nil {
+                log.Printf("error fetching subscription for task %s: %v", task.ID, err)
+                continue
+            }
+            w.Cache.Set(task.SubscriptionID, sub)
         }
 
         // Attempt delivery
