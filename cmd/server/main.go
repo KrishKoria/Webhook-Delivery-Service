@@ -26,6 +26,7 @@ func main() {
     r.GET("/healthz", func(c *gin.Context) {
         c.JSON(http.StatusOK, gin.H{"status": "ok"})
     })
+    
 
     subCache := cache.NewSubscriptionCache(5 * time.Minute) // 5 min TTL
 

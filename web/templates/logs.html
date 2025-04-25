@@ -17,27 +17,45 @@
     </form>
 
     <h2>Recent Delivery Logs</h2>
-    <table border="1" cellpadding="5">
-        <tr>
-            <th>Task ID</th>
-            <th>Status</th>
-            <th>Timestamp</th>
-            <th>Attempt</th>
-            <th>Outcome</th>
-            <th>HTTP Status</th>
-            <th>Error</th>
-        </tr>
-        {{range .Logs}}
-        <tr>
-            <td>{{.DeliveryTaskID}}</td>
-            <td>{{.TaskStatus}}</td>
-            <td>{{.Timestamp}}</td>
-            <td>{{.AttemptNumber}}</td>
-            <td>{{.Outcome}}</td>
-            <td>{{.HttpStatus.Int64}}</td>
-            <td>{{if .ErrorDetails.Valid}}{{.ErrorDetails.String}}{{else}}-{{end}}</td>
-        </tr>
-        {{end}}
-    </table>
+<table border="1" cellpadding="5">
+    <tr>
+        <th>Task ID</th>
+        <th>Status</th>
+        <th>Timestamp</th>
+        <th>Attempt</th>
+        <th>Outcome</th>
+        <th>HTTP Status</th>
+        <th>Error</th>
+    </tr>
+    <tbody id="logs-body">
+    <!-- Logs will be inserted here -->
+    </tbody>
+</table>
+
+<script>
+function fetchLogs() {
+    fetch('/api/subscriptions/{{.SubscriptionID}}/logs')
+        .then(response => response.json())
+        .then(logs => {
+            let html = '';
+            logs.forEach(log => {
+                html += `<tr>
+                        <td>${log.DeliveryTaskID}</td>
+                        <td>${log.status}</td>
+                        <td>${log.Timestamp}</td>
+                        <td>${log.AttemptNumber}</td>
+                        <td>${log.Outcome}</td>
+                        <td>${log.HttpStatus && log.HttpStatus.Valid ? log.HttpStatus.Int64 : '-'}</td>
+                        <td>${log.ErrorDetails && log.ErrorDetails.Valid ? log.ErrorDetails.String : '-'}</td>
+                    </tr>`;
+            });
+            document.getElementById('logs-body').innerHTML = html;
+        });
+}
+
+// Initial fetch and then poll every 5 seconds
+fetchLogs();
+setInterval(fetchLogs, 5000);
+</script>
 </body>
 </html>

@@ -22,7 +22,8 @@ func RegisterUIRoutes(r *gin.Engine, h *UIHandler) {
     r.POST("/ui/subscriptions/new", h.CreateSubscriptionForm)
     r.GET("/ui/subscriptions/:id/logs", h.SubscriptionLogsPage)
     r.POST("/ui/subscriptions/:id/send", h.SendTestWebhook)
-    r.GET("/ui/subscriptions/:id/analytics", h.SubscriptionAnalyticsPage) // NEW
+    r.GET("/ui/subscriptions/:id/analytics", h.SubscriptionAnalyticsPage) 
+    r.GET("/api/subscriptions/:id/logs", h.GetLogsJSON)
 
 }
 
@@ -157,4 +158,32 @@ c.HTML(http.StatusOK, "analytics.html", gin.H{
     "LastAttempt":    lastAttemptStr,
     "Logs":           logs,
 })
+}
+
+func (h *UIHandler) GetLogsJSON(c *gin.Context) {
+    id := c.Param("id")
+    logs, err := h.Queries.ListRecentDeliveryLogsForSubscription(c, id)
+    if err != nil {
+        c.JSON(500, gin.H{"error": err.Error()})
+        return
+    }
+
+    type LogWithStatus struct {
+        database.DeliveryLog
+        TaskStatus string `json:"status"`
+    }
+    var logsWithStatus []LogWithStatus
+    for _, logEntry := range logs {
+        status := "-"
+        task, err := h.Queries.GetDeliveryTask(c, logEntry.DeliveryTaskID)
+        if err == nil {
+            status = task.Status
+        }
+        logsWithStatus = append(logsWithStatus, LogWithStatus{
+            DeliveryLog: logEntry,
+            TaskStatus:  status,
+        })
+    }
+
+    c.JSON(200, logsWithStatus)
 }
