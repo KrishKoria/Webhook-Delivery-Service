@@ -1,3 +1,4 @@
+-- +goose up
 CREATE TABLE IF NOT EXISTS subscriptions (
     id TEXT PRIMARY KEY,
     target_url TEXT NOT NULL,
@@ -30,3 +31,8 @@ CREATE TABLE IF NOT EXISTS delivery_logs (
     FOREIGN KEY(delivery_task_id) REFERENCES delivery_tasks(id),
     FOREIGN KEY(subscription_id) REFERENCES subscriptions(id)
 );
+
+-- +goose down
+DROP TABLE IF EXISTS delivery_logs;
+DROP TABLE IF EXISTS delivery_tasks;
+DROP TABLE IF EXISTS subscriptions;
