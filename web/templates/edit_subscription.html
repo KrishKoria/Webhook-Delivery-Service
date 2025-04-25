@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Edit Subscription</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <h1>Edit Subscription</h1>
+    <form method="POST" action="/ui/subscriptions/{{.Subscription.ID}}/edit">
+        <label>Target URL: <input type="text" name="target_url" value="{{.Subscription.TargetUrl}}" required></label><br><br>
+        <label>Secret (optional): <input type="text" name="secret" value="{{if .Subscription.Secret.Valid}}{{.Subscription.Secret.String}}{{end}}"></label><br><br>
+        <label>Event Types (comma-separated): <input type="text" name="event_types" value="{{if .Subscription.EventTypes.Valid}}{{.Subscription.EventTypes.String}}{{end}}"></label><br><br>
+        <button type="submit">Update</button>
+    </form>
+    <br>
+    <a href="/ui/subscriptions">Back to Subscriptions</a>
+</body>
+</html>

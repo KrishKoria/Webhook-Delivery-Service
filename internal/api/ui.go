@@ -2,8 +2,10 @@ package api
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
 	"database/sql"
-	"io"
+	"encoding/hex"
 	"net/http"
 	"time"
 
@@ -22,9 +24,11 @@ func RegisterUIRoutes(r *gin.Engine, h *UIHandler) {
     r.POST("/ui/subscriptions/new", h.CreateSubscriptionForm)
     r.GET("/ui/subscriptions/:id/logs", h.SubscriptionLogsPage)
     r.POST("/ui/subscriptions/:id/send", h.SendTestWebhook)
-    r.GET("/ui/subscriptions/:id/analytics", h.SubscriptionAnalyticsPage) 
+    r.GET("/ui/subscriptions/:id/analytics", h.SubscriptionAnalyticsPage)
     r.GET("/api/subscriptions/:id/logs", h.GetLogsJSON)
-
+    r.GET("/ui/subscriptions/:id/edit", h.EditSubscriptionForm)
+    r.POST("/ui/subscriptions/:id/edit", h.UpdateSubscriptionForm)
+    r.POST("/ui/subscriptions/:id/delete", h.DeleteSubscription)
 }
 
 // List all subscriptions
@@ -44,6 +48,16 @@ func (h *UIHandler) NewSubscriptionForm(c *gin.Context) {
     c.HTML(http.StatusOK, "new_subscription.html", nil)
 }
 
+func (h *UIHandler) EditSubscriptionForm(c *gin.Context) {
+    id := c.Param("id")
+    sub, err := h.Queries.GetSubscription(c, id)
+    if err != nil {
+        c.String(404, "Subscription not found")
+        return
+    }
+    c.HTML(200, "edit_subscription.html", gin.H{"Subscription": sub})
+}
+
 // Handle create subscription POST
 func (h *UIHandler) CreateSubscriptionForm(c *gin.Context) {
     targetURL := c.PostForm("target_url")
@@ -61,6 +75,35 @@ func (h *UIHandler) CreateSubscriptionForm(c *gin.Context) {
         return
     }
     c.Redirect(http.StatusSeeOther, "/ui/subscriptions")
+}
+
+// Handle update
+func (h *UIHandler) UpdateSubscriptionForm(c *gin.Context) {
+    id := c.Param("id")
+    targetURL := c.PostForm("target_url")
+    secret := c.PostForm("secret")
+    eventTypes := c.PostForm("event_types")
+    err := h.Queries.UpdateSubscription(c, database.UpdateSubscriptionParams{
+        TargetUrl:  targetURL,
+        Secret:     sql.NullString{String: secret, Valid: secret != ""},
+        EventTypes: sql.NullString{String: eventTypes, Valid: eventTypes != ""},
+        ID:         id,
+    })
+    if err != nil {
+        c.String(500, "Update failed: %v", err)
+        return
+    }
+    c.Redirect(303, "/ui/subscriptions")
+}
+
+func (h *UIHandler) DeleteSubscription(c *gin.Context) {
+    id := c.Param("id")
+    err := h.Queries.DeleteSubscription(c, id)
+    if err != nil {
+        c.String(500, "Delete failed: %v", err)
+        return
+    }
+    c.Redirect(303, "/ui/subscriptions")
 }
 
 func (h *UIHandler) SubscriptionLogsPage(c *gin.Context) {
@@ -95,10 +138,10 @@ func (h *UIHandler) SubscriptionLogsPage(c *gin.Context) {
     })
 }
 
-// SendTestWebhook proxies a test payload to the ingest endpoint
 func (h *UIHandler) SendTestWebhook(c *gin.Context) {
     id := c.Param("id")
     payload := c.PostForm("payload")
+    eventType := c.PostForm("event_type")
 
     url := "http://localhost:8080/ingest/" + id
 
@@ -108,6 +151,16 @@ func (h *UIHandler) SendTestWebhook(c *gin.Context) {
         return
     }
     req.Header.Set("Content-Type", "application/json")
+    req.Header.Set("X-Event-Type", eventType)
+
+    // Add HMAC signature if secret is set
+    sub, err := h.Queries.GetSubscription(c, id)
+    if err == nil && sub.Secret.Valid && sub.Secret.String != "" {
+        mac := hmac.New(sha256.New, []byte(sub.Secret.String))
+        mac.Write([]byte(payload))
+        signature := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+        req.Header.Set("X-Hub-Signature-256", signature)
+    }
 
     client := &http.Client{}
     resp, err := client.Do(req)
@@ -116,7 +169,6 @@ func (h *UIHandler) SendTestWebhook(c *gin.Context) {
         return
     }
     defer resp.Body.Close()
-    io.Copy(io.Discard, resp.Body) 
 
     c.Redirect(http.StatusSeeOther, "/ui/subscriptions/"+id+"/logs")
 }
@@ -130,34 +182,34 @@ func (h *UIHandler) SubscriptionAnalyticsPage(c *gin.Context) {
     }
 
     var total, success, failed int
-var lastAttempt time.Time
+    var lastAttempt time.Time
 
-for _, logEntry := range logs {
-    total++
-    if logEntry.Outcome == "success" {
-        success++
+    for _, logEntry := range logs {
+        total++
+        if logEntry.Outcome == "success" {
+            success++
+        }
+        if logEntry.Outcome == "failed_attempt" || logEntry.Outcome == "failure" {
+            failed++
+        }
+        if logEntry.Timestamp.After(lastAttempt) {
+            lastAttempt = logEntry.Timestamp
+        }
     }
-    if logEntry.Outcome == "failed_attempt" || logEntry.Outcome == "failure" {
-        failed++
-    }
-    if logEntry.Timestamp.After(lastAttempt) {
-        lastAttempt = logEntry.Timestamp
-    }
-}
 
-var lastAttemptStr string
-if !lastAttempt.IsZero() {
-    lastAttemptStr = lastAttempt.Format(time.RFC3339) 
-}
+    var lastAttemptStr string
+    if !lastAttempt.IsZero() {
+        lastAttemptStr = lastAttempt.Format(time.RFC3339)
+    }
 
-c.HTML(http.StatusOK, "analytics.html", gin.H{
-    "SubscriptionID": id,
-    "Total":          total,
-    "Success":        success,
-    "Failed":         failed,
-    "LastAttempt":    lastAttemptStr,
-    "Logs":           logs,
-})
+    c.HTML(http.StatusOK, "analytics.html", gin.H{
+        "SubscriptionID": id,
+        "Total":          total,
+        "Success":        success,
+        "Failed":         failed,
+        "LastAttempt":    lastAttemptStr,
+        "Logs":           logs,
+    })
 }
 
 func (h *UIHandler) GetLogsJSON(c *gin.Context) {
