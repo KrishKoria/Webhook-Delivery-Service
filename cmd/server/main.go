@@ -40,6 +40,8 @@ func main() {
 
     worker := delivery.NewWorker(queries)
     go worker.Start(context.Background())
+    cleanupWorker := delivery.NewCleanupWorker(queries)
+    go cleanupWorker.Start(context.Background())
 
 
     r.Run(":8080") 

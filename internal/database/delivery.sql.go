@@ -61,6 +61,16 @@ func (q *Queries) CreateDeliveryTask(ctx context.Context, arg CreateDeliveryTask
 	return err
 }
 
+const deleteOldDeliveryLogs = `-- name: DeleteOldDeliveryLogs :exec
+DELETE FROM delivery_logs
+WHERE timestamp < datetime('now', '-72 hours')
+`
+
+func (q *Queries) DeleteOldDeliveryLogs(ctx context.Context) error {
+	_, err := q.db.ExecContext(ctx, deleteOldDeliveryLogs)
+	return err
+}
+
 const getDeliveryTask = `-- name: GetDeliveryTask :one
 SELECT id, subscription_id, payload, created_at, status, last_attempt_at, attempt_count FROM delivery_tasks WHERE id = ?
 `

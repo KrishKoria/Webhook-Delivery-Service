@@ -32,3 +32,7 @@ SELECT * FROM delivery_logs
 WHERE subscription_id = ?
 ORDER BY timestamp DESC
 LIMIT 20;
+
+-- name: DeleteOldDeliveryLogs :exec
+DELETE FROM delivery_logs
+WHERE timestamp < datetime('now', '-72 hours');
