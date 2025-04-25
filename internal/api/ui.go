@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/database"
 	"github.com/gin-gonic/gin"
@@ -21,6 +22,8 @@ func RegisterUIRoutes(r *gin.Engine, h *UIHandler) {
     r.POST("/ui/subscriptions/new", h.CreateSubscriptionForm)
     r.GET("/ui/subscriptions/:id/logs", h.SubscriptionLogsPage)
     r.POST("/ui/subscriptions/:id/send", h.SendTestWebhook)
+    r.GET("/ui/subscriptions/:id/analytics", h.SubscriptionAnalyticsPage) // NEW
+
 }
 
 // List all subscriptions
@@ -116,4 +119,43 @@ func (h *UIHandler) SendTestWebhook(c *gin.Context) {
     io.Copy(io.Discard, resp.Body) 
 
     c.Redirect(http.StatusSeeOther, "/ui/subscriptions/"+id+"/logs")
+}
+
+func (h *UIHandler) SubscriptionAnalyticsPage(c *gin.Context) {
+    id := c.Param("id")
+    logs, err := h.Queries.ListRecentDeliveryLogsForSubscription(c, id)
+    if err != nil {
+        c.String(http.StatusInternalServerError, "Error: %v", err)
+        return
+    }
+
+    var total, success, failed int
+var lastAttempt time.Time
+
+for _, logEntry := range logs {
+    total++
+    if logEntry.Outcome == "success" {
+        success++
+    }
+    if logEntry.Outcome == "failed_attempt" || logEntry.Outcome == "failure" {
+        failed++
+    }
+    if logEntry.Timestamp.After(lastAttempt) {
+        lastAttempt = logEntry.Timestamp
+    }
+}
+
+var lastAttemptStr string
+if !lastAttempt.IsZero() {
+    lastAttemptStr = lastAttempt.Format(time.RFC3339) 
+}
+
+c.HTML(http.StatusOK, "analytics.html", gin.H{
+    "SubscriptionID": id,
+    "Total":          total,
+    "Success":        success,
+    "Failed":         failed,
+    "LastAttempt":    lastAttemptStr,
+    "Logs":           logs,
+})
 }

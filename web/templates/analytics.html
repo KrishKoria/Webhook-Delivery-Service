@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Analytics for Subscription {{.SubscriptionID}}</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <h1>Analytics for Subscription {{.SubscriptionID}}</h1>
+    <a href="/ui/subscriptions/{{.SubscriptionID}}/logs">Back to Logs</a>
+    <a href="/ui/subscriptions">Back to Subscriptions</a>
+    <h2>Summary</h2>
+    <ul>
+        <li><strong>Total Deliveries:</strong> {{.Total}}</li>
+        <li><strong>Successful:</strong> {{.Success}}</li>
+        <li><strong>Failed:</strong> {{.Failed}}</li>
+        <li><strong>Last Attempt:</strong> {{.LastAttempt}}</li>
+    </ul>
+    <h2>Recent Delivery Attempts</h2>
+    <table>
+        <tr>
+            <th>Task ID</th>
+            <th>Timestamp</th>
+            <th>Attempt</th>
+            <th>Outcome</th>
+            <th>HTTP Status</th>
+            <th>Error</th>
+        </tr>
+        {{range .Logs}}
+        <tr>
+            <td>{{.DeliveryTaskID}}</td>
+            <td>{{.Timestamp}}</td>
+            <td>{{.AttemptNumber}}</td>
+            <td>{{.Outcome}}</td>
+            <td>{{.HttpStatus.Int64}}</td>
+            <td>{{if .ErrorDetails.Valid}}{{.ErrorDetails.String}}{{else}}-{{end}}</td>
+        </tr>
+        {{end}}
+    </table>
+</body>
+</html>
