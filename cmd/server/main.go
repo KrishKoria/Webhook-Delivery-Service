@@ -17,6 +17,8 @@ func main() {
     if err := db.Init(); err != nil {
         log.Fatalf("failed to initialize db: %v", err)
     }
+    r.LoadHTMLGlob("web/templates/*.html")
+    r.Static("/static", "./web/static")
     queries := database.New(db.DB)
     
     r.GET("/healthz", func(c *gin.Context) {
@@ -32,6 +34,9 @@ func main() {
 
     webhookHandler := &api.WebhookHandler{Queries: queries}
     api.RegisterWebhookRoutes(r, webhookHandler)
+
+    uiHandler := &api.UIHandler{Queries: queries}
+    api.RegisterUIRoutes(r, uiHandler)
 
     worker := delivery.NewWorker(queries)
     go worker.Start(context.Background())

@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Create Subscription</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <h1>Create New Subscription</h1>
+    <form method="POST" action="/ui/subscriptions/new">
+        <label>Target URL: <input type="text" name="target_url" required></label><br><br>
+        <label>Secret (optional): <input type="text" name="secret"></label><br><br>
+        <button type="submit">Create</button>
+    </form>
+    <br>
+    <a href="/ui/subscriptions">Back to Subscriptions</a>
+</body>
+</html>
