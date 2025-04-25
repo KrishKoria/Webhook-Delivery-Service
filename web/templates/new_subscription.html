@@ -9,6 +9,9 @@
     <form method="POST" action="/ui/subscriptions/new">
         <label>Target URL: <input type="text" name="target_url" required></label><br><br>
         <label>Secret (optional): <input type="text" name="secret"></label><br><br>
+        <label>Event Types (comma-separated, e.g. order.created,user.updated):<br>
+            <input type="text" name="event_types">
+        </label><br><br>
         <button type="submit">Create</button>
     </form>
     <br>

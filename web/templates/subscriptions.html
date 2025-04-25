@@ -14,6 +14,7 @@
             <th>Secret</th>
             <th>Created At</th>
             <th>Actions</th>
+            <th>Event Types</th>
         </tr>
         {{range .Subscriptions}}
         <tr>
@@ -21,6 +22,7 @@
             <td>{{.TargetUrl}}</td>
             <td>{{if .Secret.Valid}}{{.Secret.String}}{{else}}-{{end}}</td>
             <td>{{.CreatedAt}}</td>
+            <td>{{.EventTypes.String}}</td>
             <td>
                 <a href="/ui/subscriptions/{{.ID}}/logs">View Logs</a>
                 <a href="/ui/subscriptions/{{.ID}}/analytics">Analytics</a>

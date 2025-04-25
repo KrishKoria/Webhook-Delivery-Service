@@ -25,26 +25,24 @@ func RegisterSubscriptionRoutes(r *gin.Engine, h *SubscriptionHandler) {
     r.DELETE("/subscriptions/:id", h.DeleteSubscription)
 }
 
-// CreateSubscription handles POST /subscriptions
 func (h *SubscriptionHandler) CreateSubscription(c *gin.Context) {
     var req struct {
-        TargetURL string `json:"target_url" binding:"required"`
-        Secret    string `json:"secret"`
+        TargetUrl  string `json:"target_url" binding:"required"`
+        Secret     string `json:"secret"`
+        EventTypes string `json:"event_types"` // comma-separated
     }
     if err := c.ShouldBindJSON(&req); err != nil {
         c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
         return
     }
     id := uuid.New().String()
-    arg := database.CreateSubscriptionParams{
-        ID:        id,
-        TargetUrl: req.TargetURL,
-        Secret: sql.NullString{
-			String: req.Secret,
-			Valid:  req.Secret != "",
-		},
-    }
-    if err := h.Queries.CreateSubscription(context.Background(), arg); err != nil {
+    err := h.Queries.CreateSubscription(c, database.CreateSubscriptionParams{
+        ID:         id,
+        TargetUrl:  req.TargetUrl,
+        Secret:     sql.NullString{String: req.Secret, Valid: req.Secret != ""},
+        EventTypes: sql.NullString{String: req.EventTypes, Valid: req.EventTypes != ""},
+    })
+    if err != nil {
         c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
         return
     }

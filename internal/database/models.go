@@ -32,9 +32,10 @@ type DeliveryTask struct {
 }
 
 type Subscription struct {
-	ID        string
-	TargetUrl string
-	Secret    sql.NullString
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID         string
+	TargetUrl  string
+	Secret     sql.NullString
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+	EventTypes sql.NullString
 }

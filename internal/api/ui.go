@@ -47,14 +47,13 @@ func (h *UIHandler) NewSubscriptionForm(c *gin.Context) {
 func (h *UIHandler) CreateSubscriptionForm(c *gin.Context) {
     targetURL := c.PostForm("target_url")
     secret := c.PostForm("secret")
+    eventTypes := c.PostForm("event_types")
     id := uuid.New().String()
     err := h.Queries.CreateSubscription(c, database.CreateSubscriptionParams{
-        ID:        id,
-        TargetUrl: targetURL,
-        Secret: sql.NullString{
-            String: secret,
-            Valid:  secret != "",
-        },
+        ID:         id,
+        TargetUrl:  targetURL,
+        Secret:     sql.NullString{String: secret, Valid: secret != ""},
+        EventTypes: sql.NullString{String: eventTypes, Valid: eventTypes != ""},
     })
     if err != nil {
         c.String(http.StatusInternalServerError, "Error: %v", err)

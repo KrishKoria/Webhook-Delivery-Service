@@ -11,18 +11,24 @@ import (
 )
 
 const createSubscription = `-- name: CreateSubscription :exec
-INSERT INTO subscriptions (id, target_url, secret, created_at, updated_at)
-VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+INSERT INTO subscriptions (id, target_url, secret, event_types)
+VALUES (?, ?, ?, ?)
 `
 
 type CreateSubscriptionParams struct {
-	ID        string
-	TargetUrl string
-	Secret    sql.NullString
+	ID         string
+	TargetUrl  string
+	Secret     sql.NullString
+	EventTypes sql.NullString
 }
 
 func (q *Queries) CreateSubscription(ctx context.Context, arg CreateSubscriptionParams) error {
-	_, err := q.db.ExecContext(ctx, createSubscription, arg.ID, arg.TargetUrl, arg.Secret)
+	_, err := q.db.ExecContext(ctx, createSubscription,
+		arg.ID,
+		arg.TargetUrl,
+		arg.Secret,
+		arg.EventTypes,
+	)
 	return err
 }
 
@@ -36,7 +42,7 @@ func (q *Queries) DeleteSubscription(ctx context.Context, id string) error {
 }
 
 const getSubscription = `-- name: GetSubscription :one
-SELECT id, target_url, secret, created_at, updated_at FROM subscriptions WHERE id = ?
+SELECT id, target_url, secret, created_at, updated_at, event_types FROM subscriptions WHERE id = ?
 `
 
 func (q *Queries) GetSubscription(ctx context.Context, id string) (Subscription, error) {
@@ -48,12 +54,13 @@ func (q *Queries) GetSubscription(ctx context.Context, id string) (Subscription,
 		&i.Secret,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.EventTypes,
 	)
 	return i, err
 }
 
 const listSubscriptions = `-- name: ListSubscriptions :many
-SELECT id, target_url, secret, created_at, updated_at FROM subscriptions ORDER BY created_at DESC
+SELECT id, target_url, secret, created_at, updated_at, event_types FROM subscriptions
 `
 
 func (q *Queries) ListSubscriptions(ctx context.Context) ([]Subscription, error) {
@@ -71,6 +78,7 @@ func (q *Queries) ListSubscriptions(ctx context.Context) ([]Subscription, error)
 			&i.Secret,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.EventTypes,
 		); err != nil {
 			return nil, err
 		}
@@ -87,17 +95,23 @@ func (q *Queries) ListSubscriptions(ctx context.Context) ([]Subscription, error)
 
 const updateSubscription = `-- name: UpdateSubscription :exec
 UPDATE subscriptions
-SET target_url = ?, secret = ?, updated_at = CURRENT_TIMESTAMP
+SET target_url = ?, secret = ?, event_types = ?
 WHERE id = ?
 `
 
 type UpdateSubscriptionParams struct {
-	TargetUrl string
-	Secret    sql.NullString
-	ID        string
+	TargetUrl  string
+	Secret     sql.NullString
+	EventTypes sql.NullString
+	ID         string
 }
 
 func (q *Queries) UpdateSubscription(ctx context.Context, arg UpdateSubscriptionParams) error {
-	_, err := q.db.ExecContext(ctx, updateSubscription, arg.TargetUrl, arg.Secret, arg.ID)
+	_, err := q.db.ExecContext(ctx, updateSubscription,
+		arg.TargetUrl,
+		arg.Secret,
+		arg.EventTypes,
+		arg.ID,
+	)
 	return err
 }
