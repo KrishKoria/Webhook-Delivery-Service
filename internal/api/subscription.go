@@ -17,7 +17,7 @@ type SubscriptionHandler struct {
 }
 
 // RegisterSubscriptionRoutes registers subscription endpoints to the router.
-func 	RegisterSubscriptionRoutes(r *gin.Engine, h *SubscriptionHandler) {
+func RegisterSubscriptionRoutes(r *gin.Engine, h *SubscriptionHandler) {
     r.POST("/subscriptions", h.CreateSubscription)
     r.GET("/subscriptions", h.ListSubscriptions)
     r.GET("/subscriptions/:id", h.GetSubscription)
