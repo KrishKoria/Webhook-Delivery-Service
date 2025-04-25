@@ -11,7 +11,7 @@
  4.  The app will be available at http://localhost:8080
  
  ## Live Demo
-  [Live Application Link](https:your-live-app-url.com)
+  [Live Application Link](https://webhook-delivery-110005729669.us-central1.run.app/ui/subscriptions)
  
  ## Architecture Choices
  -  **Framework:** Go with Gin for HTTP API and UI (fast, minimal, robust).
@@ -68,11 +68,4 @@
  -  The service is run on a single instance (stateless, can be scaled horizontally).
  -  SQLite is used for local/dev; Postgres recommended for production.
  -  Delivery attempts are idempotent and safe to retry.
- 
- ## Credits
- -  Gin (https://github.com/gin-gonic/gin)
- -  sqlc (https://github.com/kyleconroy/sqlc)
- -  Docker & Docker Compose
- -  [webhook.site](https://webhook.site) for testing
- -  GitHub Copilot & OpenAI for code suggestions
  
