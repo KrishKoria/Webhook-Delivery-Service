@@ -65,3 +65,4 @@ func verifySignature(body []byte, secret, signature string) bool {
     expected := "sha256=" + hex.EncodeToString(mac.Sum(nil))
     return hmac.Equal([]byte(expected), []byte(signature))
 }
+
