@@ -149,17 +149,6 @@ curl http://localhost:8080/subscriptions/<id>/deliveries
 
 ---
 
-## Testing
-
-- Unit and integration tests cover subscription management, queueing, delivery attempts, retries, and status checks.
-- Run tests with:
-  ```sh
-  go test ./...
-  ```
-- Postman collection and OpenAPI docs available for API testing.
-
----
-
 ## Deployment
 
 - **Google Cloud Run:**  
