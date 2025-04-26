@@ -172,10 +172,6 @@ curl http://localhost:8080/subscriptions/<id>/deliveries
   UI allows retrying failed deliveries from the DLQ.
 - **Health Check:**  
   `/healthz` endpoint for monitoring and orchestration.
-- **OpenAPI Docs:**  
-  API documentation available at `/docs` (if enabled).
-- **Live Log Streaming:**  
-  UI supports real-time updates of delivery logs (if enabled).
 
 ---
 
