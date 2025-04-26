@@ -43,7 +43,6 @@ func (h *UIHandler) ListSubscriptionsPage(c *gin.Context) {
     })
 }
 
-// Show create subscription form
 func (h *UIHandler) NewSubscriptionForm(c *gin.Context) {
     c.HTML(http.StatusOK, "new_subscription.html", nil)
 }
@@ -58,7 +57,6 @@ func (h *UIHandler) EditSubscriptionForm(c *gin.Context) {
     c.HTML(200, "edit_subscription.html", gin.H{"Subscription": sub})
 }
 
-// Handle create subscription POST
 func (h *UIHandler) CreateSubscriptionForm(c *gin.Context) {
     targetURL := c.PostForm("target_url")
     secret := c.PostForm("secret")
@@ -77,7 +75,6 @@ func (h *UIHandler) CreateSubscriptionForm(c *gin.Context) {
     c.Redirect(http.StatusSeeOther, "/ui/subscriptions")
 }
 
-// Handle update
 func (h *UIHandler) UpdateSubscriptionForm(c *gin.Context) {
     id := c.Param("id")
     targetURL := c.PostForm("target_url")
@@ -114,7 +111,6 @@ func (h *UIHandler) SubscriptionLogsPage(c *gin.Context) {
         return
     }
 
-    // Fetch status for each delivery task
     type LogWithStatus struct {
         database.DeliveryLog
         TaskStatus string
@@ -153,7 +149,6 @@ func (h *UIHandler) SendTestWebhook(c *gin.Context) {
     req.Header.Set("Content-Type", "application/json")
     req.Header.Set("X-Event-Type", eventType)
 
-    // Add HMAC signature if secret is set
     sub, err := h.Queries.GetSubscription(c, id)
     if err == nil && sub.Secret.Valid && sub.Secret.String != "" {
         mac := hmac.New(sha256.New, []byte(sub.Secret.String))

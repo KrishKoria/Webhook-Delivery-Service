@@ -59,11 +59,9 @@ func (w *Worker) processPendingTasks(ctx context.Context) {
             w.Cache.Set(task.SubscriptionID, sub)
         }
 
-        // Attempt delivery
         status, httpStatus, errMsg := deliverWebhook(sub.TargetUrl, []byte(task.Payload))
         attempt := task.AttemptCount + 1
 
-        // Log the attempt
         err = w.Queries.CreateDeliveryLog(ctx, database.CreateDeliveryLogParams{
             ID:             generateUUID(),
             DeliveryTaskID: task.ID,
@@ -85,7 +83,6 @@ func (w *Worker) processPendingTasks(ctx context.Context) {
             log.Printf("error logging delivery attempt for task %s: %v", task.ID, err)
         }
 
-        // Update task status and attempt count
         newStatus := task.Status
         if status == "success" {
             newStatus = "delivered"

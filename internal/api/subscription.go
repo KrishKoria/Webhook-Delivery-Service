@@ -11,12 +11,10 @@ import (
 	"github.com/google/uuid"
 )
 
-// SubscriptionHandler holds the sqlc queries.
 type SubscriptionHandler struct {
     Queries *database.Queries
 }
 
-// RegisterSubscriptionRoutes registers subscription endpoints to the router.
 func RegisterSubscriptionRoutes(r *gin.Engine, h *SubscriptionHandler) {
     r.POST("/subscriptions", h.CreateSubscription)
     r.GET("/subscriptions", h.ListSubscriptions)
