@@ -19,10 +19,10 @@ const (
 
 type Worker struct {
     Queries *database.Queries
-    Cache  *cache.SubscriptionCache
+    Cache  *cache.RedisSubscriptionCache
 }
 
-func NewWorker(queries *database.Queries, cache *cache.SubscriptionCache) *Worker {
+func NewWorker(queries *database.Queries, cache *cache.RedisSubscriptionCache) *Worker {
     return &Worker{Queries: queries, Cache: cache}
 }
 
@@ -106,7 +106,6 @@ func (w *Worker) processPendingTasks(ctx context.Context) {
             log.Printf("error updating task status for %s: %v", task.ID, err)
         }
 
-        // If not delivered and not max attempts, schedule retry with backoff
         if status != "success" && attempt < maxAttempts {
             backoff := getBackoffDuration(int(attempt))
             log.Printf("Task %s failed, will retry in %v", task.ID, backoff)

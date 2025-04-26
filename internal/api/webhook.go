@@ -17,7 +17,7 @@ import (
 
 type WebhookHandler struct {
     Queries *database.Queries
-    Cache   *cache.SubscriptionCache
+    Cache   *cache.RedisSubscriptionCache
 }
 
 // RegisterWebhookRoutes registers the webhook ingestion endpoint.
@@ -97,6 +97,5 @@ func subscriptionAllowsEvent(sub database.Subscription, eventType string) bool {
         }
         return false
     }
-    // If no event_types specified, allow all
     return true
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/api"
@@ -26,10 +27,15 @@ func main() {
     r.GET("/healthz", func(c *gin.Context) {
         c.JSON(http.StatusOK, gin.H{"status": "ok"})
     })
-    
+    r.GET("/", func(c *gin.Context) {
+        c.Redirect(http.StatusFound, "/ui/subscriptions")
+    })
 
-    subCache := cache.NewSubscriptionCache(5 * time.Minute) // 5 min TTL
-
+    redisURL := os.Getenv("REDIS_URL")
+    if redisURL == "" {
+        redisURL = "localhost:6379"
+    }
+    subCache := cache.NewRedisSubscriptionCache(redisURL, 5 * time.Minute)
 
     subHandler := &api.SubscriptionHandler{
         Queries: queries,

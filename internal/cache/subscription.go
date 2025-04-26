@@ -1,45 +1,50 @@
 package cache
 
 import (
-	"sync"
+	"context"
+	"encoding/json"
+	"log"
 	"time"
 
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/database"
+	"github.com/redis/go-redis/v9"
 )
 
-type cachedSubscription struct {
-    Subscription database.Subscription
-    ExpiresAt    time.Time
+type RedisSubscriptionCache struct {
+    client *redis.Client
+    ttl    time.Duration
 }
 
-type SubscriptionCache struct {
-    mu    sync.RWMutex
-    items map[string]cachedSubscription
-    ttl   time.Duration
-}
-
-func NewSubscriptionCache(ttl time.Duration) *SubscriptionCache {
-    return &SubscriptionCache{
-        items: make(map[string]cachedSubscription),
-        ttl:   ttl,
+func NewRedisSubscriptionCache(redisURL string, ttl time.Duration) *RedisSubscriptionCache {
+    opts, err := redis.ParseURL(redisURL)
+    if err != nil {
+        log.Printf("Invalid REDIS_URL: %v", err)
+        return &RedisSubscriptionCache{client: nil, ttl: ttl}
     }
+    client := redis.NewClient(opts)
+    ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+    defer cancel()
+    if err := client.Ping(ctx).Err(); err != nil {
+        log.Printf("Redis connection failed: %v", err)
+    } else {
+        log.Println("Redis connected successfully")
+    }
+    return &RedisSubscriptionCache{client: client, ttl: ttl}
 }
 
-func (c *SubscriptionCache) Get(id string) (database.Subscription, bool) {
-    c.mu.RLock()
-    defer c.mu.RUnlock()
-    item, ok := c.items[id]
-    if !ok || time.Now().After(item.ExpiresAt) {
+func (c *RedisSubscriptionCache) Get(id string) (database.Subscription, bool) {
+    ctx := context.Background()
+    val, err := c.client.Get(ctx, id).Result()
+    if err != nil {
         return database.Subscription{}, false
     }
-    return item.Subscription, true
+    var sub database.Subscription
+    _ = json.Unmarshal([]byte(val), &sub)       
+    return sub, true
 }
 
-func (c *SubscriptionCache) Set(id string, sub database.Subscription) {
-    c.mu.Lock()
-    defer c.mu.Unlock()
-    c.items[id] = cachedSubscription{
-        Subscription: sub,
-        ExpiresAt:    time.Now().Add(c.ttl),
-    }
+func (c *RedisSubscriptionCache) Set(id string, sub database.Subscription) {
+    ctx := context.Background()
+    b, _ := json.Marshal(sub)
+    c.client.Set(ctx, id, b, c.ttl)
 }
