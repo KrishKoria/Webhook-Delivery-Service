@@ -53,7 +53,7 @@
 - **Containerization:** Docker, orchestrated with Docker Compose.
 - **Cloud Ready:** Deployable to Google Cloud Run, Fly.io, Railway, etc.
 - **Dead Letter Queue:** Failed deliveries after max retries are moved to a DLQ for manual review/retry.
-- **Observability:** Health check endpoint, structured logging, and (optionally) Prometheus metrics.
+- **Observability:** Health check endpoint, structured logging
 
 ---
 
