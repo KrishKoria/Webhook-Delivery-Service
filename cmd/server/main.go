@@ -48,6 +48,11 @@ func main() {
     webhookHandler := &api.WebhookHandler{Queries: queries, Cache: subCache}
     api.RegisterWebhookRoutes(r, webhookHandler)
 
+    dlqHandler := &api.DLQHandler{
+        Queries: queries,
+    }
+    api.RegisterDLQRoutes(r, dlqHandler)
+
     uiHandler := &api.UIHandler{Queries: queries}
     api.RegisterUIRoutes(r, uiHandler)
 

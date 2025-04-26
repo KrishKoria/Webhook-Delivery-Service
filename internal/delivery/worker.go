@@ -19,7 +19,7 @@ const (
 
 type Worker struct {
     Queries *database.Queries
-    Cache  *cache.RedisSubscriptionCache
+    Cache   *cache.RedisSubscriptionCache
 }
 
 func NewWorker(queries *database.Queries, cache *cache.RedisSubscriptionCache) *Worker {
@@ -70,14 +70,14 @@ func (w *Worker) processPendingTasks(ctx context.Context) {
             Timestamp:      time.Now(),
             AttemptNumber:  int64(attempt),
             Outcome:        status,
-            HttpStatus:     sql.NullInt64{
-				Int64: int64(httpStatus),
-				Valid: httpStatus != 0, 
-			},
-            ErrorDetails:   sql.NullString{
-				String: errMsg,
-				Valid:  errMsg != "",
-			},
+            HttpStatus: sql.NullInt64{
+                Int64: int64(httpStatus),
+                Valid: httpStatus != 0,
+            },
+            ErrorDetails: sql.NullString{
+                String: errMsg,
+                Valid:  errMsg != "",
+            },
         })
         if err != nil {
             log.Printf("error logging delivery attempt for task %s: %v", task.ID, err)
@@ -91,16 +91,48 @@ func (w *Worker) processPendingTasks(ctx context.Context) {
         }
 
         err = w.Queries.UpdateDeliveryTaskStatus(ctx, database.UpdateDeliveryTaskStatusParams{
-            Status:        newStatus,
+            Status: newStatus,
             LastAttemptAt: sql.NullTime{
-				Time:  time.Now(),
-				Valid: true,
-			},
-            AttemptCount:  int64(attempt),
-            ID:            task.ID,
+                Time:  time.Now(),
+                Valid: true,
+            },
+            AttemptCount: int64(attempt),
+            ID:           task.ID,
         })
         if err != nil {
             log.Printf("error updating task status for %s: %v", task.ID, err)
+        }
+        
+        
+        if status != "success" && attempt >= maxAttempts {
+            dlqErr := w.Queries.InsertDeadLetterTask(ctx, database.InsertDeadLetterTaskParams{
+                ID:              generateUUID(),
+                OriginalTaskID:  task.ID,
+                SubscriptionID:  task.SubscriptionID,
+                Payload:         task.Payload,
+                FailedAt:        time.Now(),
+                Reason:          errMsg,
+                LastAttemptAt:   sql.NullTime{
+                    Time:  time.Now(),
+                    Valid: true,
+                },
+                AttemptCount:    int64(attempt),
+                Status:          "pending",
+                TargetUrl:       sql.NullString{
+                    String: sub.TargetUrl,
+                    Valid:  sub.TargetUrl != "",
+                },
+                EventType:       sql.NullString{
+                    String: "",
+                    Valid:  false, 
+                },
+                ErrorDetails:    sql.NullString{String: errMsg, Valid: errMsg != ""},
+            })
+            if dlqErr != nil {
+                log.Printf("error inserting into dead letter queue for task %s: %v", task.ID, dlqErr)
+            } else {
+                log.Printf("Task %s moved to dead letter queue after %d attempts", task.ID, attempt)
+            }
         }
 
         if status != "success" && attempt < maxAttempts {

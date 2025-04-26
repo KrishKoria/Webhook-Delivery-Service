@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dead Letter Queue</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<h2>Dead Letter Queue for Subscription {{ .SubscriptionID }}</h2>
+<table border="1" cellpadding="6" cellspacing="0">
+  <tr>
+    <th>ID</th>
+    <th>Reason</th>
+    <th>Attempts</th>
+    <th>Failed At</th>
+    <th>Status</th>
+    <th>Actions</th>
+  </tr>
+  {{ range .Tasks }}
+  <tr>
+    <td>{{ .ID }}</td>
+    <td>{{ .Reason }}</td>
+    <td>{{ .AttemptCount }}</td>
+    <td>{{ .FailedAt }}</td>
+    <td>{{ .Status }}</td>
+    <td>
+      <form method="POST" action="/ui/dlq/{{ .ID }}/retry" style="display:inline">
+        <button type="submit">Retry</button>
+      </form>
+      <form method="POST" action="/ui/dlq/{{ .ID }}/delete" style="display:inline" onsubmit="return confirm('Delete this DLQ task?')">
+        <button type="submit">Delete</button>
+      </form>
+    </td>
+  </tr>
+  {{ else }}
+  <tr>
+    <td colspan="6">No dead letter tasks found.</td>
+  </tr>
+  {{ end }}
+</table>
+<br>
+<a href="/ui/subscriptions/{{ .SubscriptionID }}/logs">Back to Logs</a>
+</body>
+</html>

@@ -9,6 +9,21 @@ import (
 	"time"
 )
 
+type DeadLetterTask struct {
+	ID             string
+	OriginalTaskID string
+	SubscriptionID string
+	Payload        string
+	FailedAt       time.Time
+	Reason         string
+	LastAttemptAt  sql.NullTime
+	AttemptCount   int64
+	Status         string
+	TargetUrl      sql.NullString
+	EventType      sql.NullString
+	ErrorDetails   sql.NullString
+}
+
 type DeliveryLog struct {
 	ID             string
 	DeliveryTaskID string
