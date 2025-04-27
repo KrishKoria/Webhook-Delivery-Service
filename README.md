@@ -124,8 +124,6 @@ curl http://localhost:8080/subscriptions/<id>/deliveries
 - Uses Redis for subscription caching (Upstash, Redis Cloud, etc.).
 - Set `REDIS_URL` in your `.env` (e.g., `rediss://:<password>@<host>:6379` for Upstash).
 - No local Redis container is needed if using a cloud provider.
-- Fallback to in-memory cache if Redis is not configured (for local/dev).
-
 ---
 
 ## Cost Estimation
@@ -172,6 +170,44 @@ curl http://localhost:8080/subscriptions/<id>/deliveries
   UI allows retrying failed deliveries from the DLQ.
 - **Health Check:**  
   `/healthz` endpoint for monitoring and orchestration.
+
+---
+
+## Deploying to Google Cloud Run
+
+You can deploy this service to [Google Cloud Run](https://cloud.google.com/run) in just a few steps:
+
+### 1. **Build and Push Your Docker Image**
+
+Replace `<YOUR_PROJECT_ID>` and `<YOUR_IMAGE_NAME>` with your values.
+
+```sh
+# Authenticate Docker with Google
+gcloud auth configure-docker
+
+# Build your image
+docker build -t gcr.io/<YOUR_PROJECT_ID>/<YOUR_IMAGE_NAME>:latest .
+
+# Push to Google Container Registry
+docker push gcr.io/<YOUR_PROJECT_ID>/<YOUR_IMAGE_NAME>:latest
+```
+### 2. **Deploy to Cloud Run**
+
+```sh
+
+gcloud run deploy webhook-delivery-service \
+  --image gcr.io/<YOUR_PROJECT_ID>/<YOUR_IMAGE_NAME>:latest \
+  --platform managed \
+  --region <YOUR_REGION> \
+  --allow-unauthenticated \
+  --set-env-vars DATABASE_URL=<YOUR_DATABASE_URL>,REDIS_URL=<YOUR_REDIS_URL>
+```
+
+### 3. **Access the Service**
+After deployment, you will receive a URL for your service. You can access the UI and API at 
+```sh
+https://<your-cloud-run-url>/ui/subscriptions
+```
 
 ---
 
