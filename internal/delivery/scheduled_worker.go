@@ -17,7 +17,7 @@ func NewScheduledWorker(queries *database.Queries) *ScheduledWorker {
 }
 
 func (w *ScheduledWorker) Start(ctx context.Context) {
-    ticker := time.NewTicker(1 * time.Minute)
+    ticker := time.NewTicker(10 * time.Second)
     defer ticker.Stop()
     for {
         select {
