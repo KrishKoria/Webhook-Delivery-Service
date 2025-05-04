@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Scheduled Webhooks for {{ .SubscriptionID }}</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <h1>Scheduled Webhooks for Subscription {{ .SubscriptionID }}</h1>
+
+    <div class="back-link">
+        <a href="/ui/subscriptions">Back to Subscriptions List</a> |
+        <a href="/ui/subscriptions/{{ .SubscriptionID }}/scheduled/new">Schedule New for this Subscription</a> |
+        <a href="/ui/subscriptions/{{ .SubscriptionID }}/scheduled">View Calendar</a> <!-- Optional link back to calendar -->
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Scheduled For</th>
+                <th>Payload</th>
+                <th>Recurrence</th>
+                <th>Status</th>
+                <th>Created At</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+        {{ range .ScheduledWebhooks }}
+        <tr>
+            <td>{{ .ID }}</td>
+            <td>{{ .ScheduledFor.Format "2006-01-02 15:04 MST" }}</td>
+            <td style="max-width: 300px; overflow-x: auto;">{{ .Payload }}</td>
+            <td>{{ if .Recurrence.Valid }}{{ .Recurrence.String }}{{ else }}none{{ end }}</td>
+            <td>{{ .Status }}</td>
+            <td>{{ .CreatedAt.Format "2006-01-02 15:04 MST" }}</td>
+            <td>
+                <form method="POST" action="/scheduled/{{ .ID }}?_method=DELETE" onsubmit="return confirm('Delete this scheduled webhook?');" style="display:inline;">
+                    <button type="submit" class="delete-btn" style="color: #c00; background: none; border: none; padding: 0; cursor: pointer; text-decoration: underline;">Delete</button>
+                </form>
+            </td>
+        </tr>
+        {{ else }}
+        <tr>
+            <td colspan="7">No scheduled webhooks found for this subscription.</td>
+        </tr>
+        {{ end }}
+        </tbody>
+    </table>
+
+    <script>
+        document.querySelectorAll('form[action*="_method=DELETE"]').forEach(form => {
+            form.addEventListener('submit', function(e) {
+                e.preventDefault();
+                const url = this.action.split('?')[0]; 
+                fetch(url, { method: 'DELETE' })
+                    .then(res => {
+                        if (!res.ok) {
+                            return res.text().then(text => { throw new Error(text || 'Failed to delete') });
+                        }
+                        window.location.reload();
+                    })
+                    .catch(err => {
+                        console.error("Error deleting scheduled webhook:", err);
+                        alert('Error deleting scheduled webhook: ' + err.message);
+                    });
+            });
+        });
+    </script>
+</body>
+</html>

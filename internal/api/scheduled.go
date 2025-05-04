@@ -99,6 +99,9 @@ func (h *ScheduledHandler) ListScheduled(c *gin.Context) {
     }
 
     log.Printf("Successfully fetched %d scheduled webhooks", len(tasks))
+    c.Header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate")
+    c.Header("Pragma", "no-cache")
+    c.Header("Expires", "0")
     c.JSON(http.StatusOK, tasks)
 }
 
