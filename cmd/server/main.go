@@ -56,10 +56,18 @@ func main() {
     uiHandler := &api.UIHandler{Queries: queries}
     api.RegisterUIRoutes(r, uiHandler)
 
+    scheduledHandler := &api.ScheduledHandler{Queries: queries}
+    api.RegisterScheduledRoutes(r, scheduledHandler)
+
     worker := delivery.NewWorker(queries, subCache)
     go worker.Start(context.Background())
+
     cleanupWorker := delivery.NewCleanupWorker(queries)
     go cleanupWorker.Start(context.Background())
+    
+    scheduledWorker := delivery.NewScheduledWorker(queries)
+    go scheduledWorker.Start(context.Background())
+
 
 
     port := os.Getenv("PORT")

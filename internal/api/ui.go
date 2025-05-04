@@ -29,6 +29,12 @@ func RegisterUIRoutes(r *gin.Engine, h *UIHandler) {
     r.GET("/ui/subscriptions/:id/edit", h.EditSubscriptionForm)
     r.POST("/ui/subscriptions/:id/edit", h.UpdateSubscriptionForm)
     r.POST("/ui/subscriptions/:id/delete", h.DeleteSubscription)
+    r.GET("/ui/subscriptions/:id/scheduled", h.ScheduledPage)
+    r.GET("/ui/subscriptions/:id/scheduled/new", h.NewScheduledPage) 
+    r.GET("/ui/scheduled", h.GlobalScheduledPage)
+
+
+
 }
 
 // List all subscriptions
@@ -233,4 +239,24 @@ func (h *UIHandler) GetLogsJSON(c *gin.Context) {
     }
 
     c.JSON(200, logsWithStatus)
+}
+
+func (h *UIHandler) ScheduledPage(c *gin.Context) {
+    subID := c.Param("id")
+    c.HTML(http.StatusOK, "scheduled.html", gin.H{
+        "SubscriptionID": subID,
+    })
+}
+func (h *UIHandler) NewScheduledPage(c *gin.Context) {
+    subID := c.Param("id")
+    c.HTML(http.StatusOK, "new_scheduled.html", gin.H{
+        "SubscriptionID": subID,
+    })
+}
+
+func (h *UIHandler) GlobalScheduledPage(c *gin.Context) {
+    c.HTML(http.StatusOK, "scheduled.html", gin.H{
+        "SubscriptionID": "", 
+        "IsGlobalView":   true,
+    })
 }
