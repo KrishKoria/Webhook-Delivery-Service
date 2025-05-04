@@ -36,10 +36,21 @@ func (w *ScheduledWorker) processDueScheduledWebhooks(ctx context.Context) {
         return
     }
     for _, task := range tasks {
+        deliveryTaskID := uuid.New().String()
+        err := w.Queries.CreateDeliveryTask(ctx, database.CreateDeliveryTaskParams{
+            ID:             deliveryTaskID,
+            SubscriptionID: task.SubscriptionID,
+            Payload:        task.Payload,
+        })
+        if err != nil {
+            continue
+        }
+
         _ = w.Queries.UpdateScheduledWebhookStatus(ctx, database.UpdateScheduledWebhookStatusParams{
             Status: "delivered",
             ID:     task.ID,
         })
+
         next := nextOccurrence(task.ScheduledFor, task.Recurrence.String)
         if next.After(now) && task.Recurrence.String != "none" {
             _ = w.Queries.CreateScheduledWebhook(ctx, database.CreateScheduledWebhookParams{
