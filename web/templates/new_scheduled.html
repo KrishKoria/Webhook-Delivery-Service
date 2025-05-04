@@ -7,7 +7,7 @@
 <body>
     <h1>Schedule New Webhook for Subscription {{ .SubscriptionID }}</h1>
 
-    <form method="POST" action="/scheduled">
+    <form method="POST" action="/scheduled" id="schedule-form">
         <input type="hidden" name="subscription_id" value="{{ .SubscriptionID }}">
 
         <label>
@@ -16,8 +16,9 @@
         </label>
         <label>
             Scheduled For:
-            <input type="datetime-local" name="scheduled_for" required>
+            <input type="datetime-local" name="scheduled_for_local" required>
         </label>
+        <input type="hidden" name="scheduled_for" id="scheduled_for_utc">
         <label>
             Recurrence:
             <select name="recurrence">
@@ -30,5 +31,16 @@
         <button type="submit">Schedule Webhook</button>
         <a href="/ui/subscriptions/{{ .SubscriptionID }}/scheduled/list" style="margin-left: 10px;">Cancel</a>
     </form>
+    <script>
+        document.getElementById('schedule-form').addEventListener('submit', function(e) {
+            const localTimeInput = e.target.querySelector('input[name="scheduled_for_local"]');
+            const utcTimeInput = document.getElementById('scheduled_for_utc');
+    
+            if (localTimeInput.value) {
+                const localDate = new Date(localTimeInput.value);
+                utcTimeInput.value = localDate.toISOString();
+            }
+        });
+    </script>
 </body>
 </html>

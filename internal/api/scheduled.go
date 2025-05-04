@@ -39,8 +39,7 @@ func (h *ScheduledHandler) CreateScheduled(c *gin.Context) {
         return
     }
 
-    const layout = "2006-01-02T15:04" 
-    scheduledFor, err := time.Parse(layout, scheduledForStr)
+    scheduledFor, err := time.Parse(time.RFC3339, scheduledForStr)
     if err != nil {
         log.Printf("Error parsing scheduled_for time '%s': %v", scheduledForStr, err)
         c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid scheduled_for date format. Use YYYY-MM-DDTHH:MM."})
@@ -114,3 +113,4 @@ func (h *ScheduledHandler) DeleteScheduled(c *gin.Context) {
     }
     c.Status(http.StatusNoContent)
 }
+
