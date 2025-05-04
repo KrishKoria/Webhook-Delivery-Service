@@ -28,7 +28,6 @@ table {
     background: #fff;
     box-shadow: 0 2px 8px rgba(0,0,0,0.04);
     border-radius: 8px;
-    overflow: hidden;
 }
 
 th, td {
@@ -104,6 +103,90 @@ ul {
     list-style: disc inside;
 }
 
+.dropdown {
+    position: relative;
+    display: inline-block;
+}
+
+.dropdown-content {
+    display: none;
+    position: absolute;
+    right: 0;
+    background-color: #fff;
+    min-width: 180px;
+    box-shadow: 0 8px 16px rgba(0,0,0,0.1);
+    z-index: 100;
+    border-radius: 4px;
+    overflow: visible;
+}
+
+.dropdown:hover .dropdown-content {
+    display: block;
+}
+
+.dropdown-content a, .dropdown-content form {
+    color: #333;
+    padding: 10px 14px;
+    text-decoration: none;
+    display: block;
+    border-bottom: 1px solid #f0f0f0;
+    text-align: left;
+    margin: 0;
+}
+
+.dropdown-content a:hover {
+    background-color: #f7f7fa;
+}
+
+.dropdown-content form:last-child, .dropdown-content a:last-child {
+    border-bottom: none;
+}
+
+.dropdown-content button {
+    background: none;
+    color: #e74c3c;
+    border: none;
+    font-size: 15px;
+    font-weight: normal;
+    text-align: left;
+    width: 100%;
+    padding: 0;
+    cursor: pointer;
+    font-family: inherit;
+}
+
+.dropdown-content button:hover {
+    background: none;
+    text-decoration: underline;
+}
+
+.dropdown-btn {
+    background: #2563eb;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.dropdown-btn:hover {
+    background: #1e40af;
+}
+
+td form {
+    display: inline;
+    margin: 0;
+    padding: 0;
+    background: none;
+    box-shadow: none;
+    width: auto;
+}
+
+td form button {
+    margin-left: 0;
+    vertical-align: middle;
+}
+
 @media (max-width: 700px) {
     table, form, ul {
         width: 99%;
@@ -115,14 +198,14 @@ ul {
     form {
         padding: 12px;
     }
+    .dropdown-content {
+        right: auto;
+        left: 0;
+    }
 }
 
-td form {
-    display: inline;
-    margin: 0;
-    padding: 0;
-}
-td form button {
-    margin-left: 8px;
-    vertical-align: middle;
-}
+#calendar { max-width: 1100px; margin: 2em auto 0 auto; }
+
+.fc-event { cursor: pointer; } 
+
+.back-link { display: block; text-align: center; margin-bottom: 1em; }

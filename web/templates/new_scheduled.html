@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Schedule New Webhook</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <h1>Schedule New Webhook for Subscription {{ .SubscriptionID }}</h1>
+
+    <form method="POST" action="/scheduled">
+        <input type="hidden" name="subscription_id" value="{{ .SubscriptionID }}">
+
+        <label>
+            Payload (JSON):
+            <input type="text" name="payload" required placeholder='{"key": "value"}'>
+        </label>
+        <label>
+            Scheduled For:
+            <input type="datetime-local" name="scheduled_for" required>
+        </label>
+        <label>
+            Recurrence:
+            <select name="recurrence">
+                <option value="none">None</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+            </select>
+        </label>
+        <button type="submit">Schedule Webhook</button>
+        <a href="/ui/subscriptions/{{ .SubscriptionID }}/scheduled" style="margin-left: 10px;">Cancel</a>
+    </form>
+</body>
+</html>

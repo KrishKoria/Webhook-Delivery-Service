@@ -7,14 +7,15 @@
 <body>
     <h1>Webhook Subscriptions</h1>
     <a href="/ui/subscriptions/new">Create New Subscription</a>
+    <a href="/ui/scheduled">View All Scheduled Webhooks</a>
     <table border="1" cellpadding="5">
         <tr>
             <th>ID</th>
             <th>Target URL</th>
             <th>Secret</th>
             <th>Created At</th>
-            <th>Actions</th>
             <th>Event Types</th>
+            <th>Actions</th>
         </tr>
         {{range .Subscriptions}}
         <tr>
@@ -22,15 +23,21 @@
             <td>{{.TargetUrl}}</td>
             <td>{{if .Secret.Valid}}{{.Secret.String}}{{else}}-{{end}}</td>
             <td>{{.CreatedAt}}</td>
-            <td>{{.EventTypes.String}}</td>
+            <td>{{if .EventTypes.Valid}}{{.EventTypes.String}}{{else}}-{{end}}</td>
             <td>
-                <a href="/ui/subscriptions/{{.ID}}/logs">View Logs</a>
-                <a href="/ui/subscriptions/{{.ID}}/analytics">Analytics</a>
-                <a href="/ui/subscriptions/{{.ID}}/edit">Edit</a>
-                <a href="/ui/subscriptions/{{.ID}}/dlq">Dead Letter Queue</a>
-                <form method="POST" action="/ui/subscriptions/{{.ID}}/delete" style="display:inline; margin:0; padding:0;" onsubmit="return confirm('Delete this subscription?');">
-                    <button type="submit" style="margin-left:8px;">Delete</button>
-                </form>
+                <div class="dropdown">
+                    <button class="dropdown-btn">Actions ▾</button>
+                    <div class="dropdown-content">
+                        <a href="/ui/subscriptions/{{.ID}}/logs">View Logs</a>
+                        <a href="/ui/subscriptions/{{.ID}}/analytics">Analytics</a>
+                        <a href="/ui/subscriptions/{{.ID}}/edit">Edit</a>
+                        <a href="/ui/subscriptions/{{.ID}}/dlq">Dead Letter Queue</a>
+                        <a href="/ui/subscriptions/{{.ID}}/scheduled/new">Schedule New</a>
+                        <form method="POST" action="/ui/subscriptions/{{.ID}}/delete" onsubmit="return confirm('Delete this subscription?');">
+                            <button type="submit">Delete</button>
+                        </form>
+                    </div>
+                </div>
             </td>
         </tr>
         {{end}}

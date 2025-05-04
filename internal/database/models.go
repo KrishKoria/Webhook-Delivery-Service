@@ -46,6 +46,17 @@ type DeliveryTask struct {
 	AttemptCount   int64
 }
 
+type ScheduledWebhook struct {
+	ID             string
+	SubscriptionID string
+	Payload        string
+	ScheduledFor   time.Time
+	Recurrence     sql.NullString
+	Status         string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
 type Subscription struct {
 	ID         string
 	TargetUrl  string
