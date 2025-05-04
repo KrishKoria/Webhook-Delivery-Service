@@ -204,8 +204,4 @@ td form button {
     }
 }
 
-#calendar { max-width: 1100px; margin: 2em auto 0 auto; }
-
-.fc-event { cursor: pointer; } 
-
 .back-link { display: block; text-align: center; margin-bottom: 1em; }
