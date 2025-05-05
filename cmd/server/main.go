@@ -39,7 +39,9 @@ func main() {
 
     subHandler := &api.SubscriptionHandler{
         Queries: queries,
+        Cache:   subCache,
     }
+
     api.RegisterSubscriptionRoutes(r, subHandler)
 
     analyticsHandler := &api.AnalyticsHandler{Queries: queries}
@@ -53,7 +55,7 @@ func main() {
     }
     api.RegisterDLQRoutes(r, dlqHandler)
 
-    uiHandler := &api.UIHandler{Queries: queries}
+    uiHandler := &api.UIHandler{Queries: queries, Cache: subCache}
     api.RegisterUIRoutes(r, uiHandler)
 
     scheduledHandler := &api.ScheduledHandler{Queries: queries}
