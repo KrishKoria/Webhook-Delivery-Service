@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/KrishKoria/Webhook-Delivery-Service/internal/cache"
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/database"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -16,6 +17,7 @@ import (
 
 type UIHandler struct {
     Queries *database.Queries
+    Cache *cache.RedisSubscriptionCache
 }
 
 func RegisterUIRoutes(r *gin.Engine, h *UIHandler) {
@@ -92,6 +94,9 @@ func (h *UIHandler) UpdateSubscriptionForm(c *gin.Context) {
         c.String(500, "Update failed: %v", err)
         return
     }
+    if h.Cache != nil {
+        h.Cache.Del(id)
+    }
     c.Redirect(303, "/ui/subscriptions")
 }
 
@@ -101,6 +106,9 @@ func (h *UIHandler) DeleteSubscription(c *gin.Context) {
     if err != nil {
         c.String(500, "Delete failed: %v", err)
         return
+    }
+    if h.Cache != nil {
+        h.Cache.Del(id)
     }
     c.Redirect(303, "/ui/subscriptions")
 }

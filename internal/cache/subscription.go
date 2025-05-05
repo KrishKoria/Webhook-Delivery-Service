@@ -48,3 +48,8 @@ func (c *RedisSubscriptionCache) Set(id string, sub database.Subscription) {
     b, _ := json.Marshal(sub)
     c.client.Set(ctx, id, b, c.ttl)
 }
+
+func (c *RedisSubscriptionCache) Del(id string) {
+    ctx := context.Background()
+    c.client.Del(ctx, id)
+}

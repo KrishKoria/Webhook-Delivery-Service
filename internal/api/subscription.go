@@ -6,6 +6,7 @@ import (
 
 	"context"
 
+	"github.com/KrishKoria/Webhook-Delivery-Service/internal/cache"
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/database"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -13,6 +14,7 @@ import (
 
 type SubscriptionHandler struct {
     Queries *database.Queries
+    Cache   *cache.RedisSubscriptionCache
 }
 
 func RegisterSubscriptionRoutes(r *gin.Engine, h *SubscriptionHandler) {
@@ -91,6 +93,9 @@ func (h *SubscriptionHandler) UpdateSubscription(c *gin.Context) {
         c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
         return
     }
+    if h.Cache != nil {
+        h.Cache.Del(id)
+    }
     c.Status(http.StatusNoContent)
 }
 
@@ -100,6 +105,9 @@ func (h *SubscriptionHandler) DeleteSubscription(c *gin.Context) {
     if err := h.Queries.DeleteSubscription(context.Background(), id); err != nil {
         c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
         return
+    }
+    if h.Cache != nil {
+        h.Cache.Del(id)
     }
     c.Status(http.StatusNoContent)
 }
