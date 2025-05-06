@@ -137,8 +137,18 @@ func (w *Worker) processPendingTasks(ctx context.Context) {
 
         if status != "success" && attempt < maxAttempts {
             backoff := getBackoffDuration(int(attempt))
-            log.Printf("Task %s failed, will retry in %v", task.ID, backoff)
-            time.Sleep(backoff)
+            nextAttempt := time.Now().Add(backoff)
+            
+            err = w.Queries.UpdateDeliveryTaskNextAttemptAt(ctx, database.UpdateDeliveryTaskNextAttemptAtParams{
+                ID: task.ID,
+                NextAttemptAt: sql.NullTime{
+                    Time: nextAttempt,
+                    Valid: true,
+                },
+            })
+            if err != nil {
+                log.Printf("Error updating next attempt time: %v", err)
+            }
         }
     }
 }

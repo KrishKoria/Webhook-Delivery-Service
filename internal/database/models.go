@@ -44,6 +44,7 @@ type DeliveryTask struct {
 	Status         string
 	LastAttemptAt  sql.NullTime
 	AttemptCount   int64
+	NextAttemptAt  sql.NullTime
 }
 
 type ScheduledWebhook struct {

@@ -72,7 +72,7 @@ func (q *Queries) DeleteOldDeliveryLogs(ctx context.Context) error {
 }
 
 const getDeliveryTask = `-- name: GetDeliveryTask :one
-SELECT id, subscription_id, payload, created_at, status, last_attempt_at, attempt_count FROM delivery_tasks WHERE id = ?
+SELECT id, subscription_id, payload, created_at, status, last_attempt_at, attempt_count, next_attempt_at FROM delivery_tasks WHERE id = ?
 `
 
 func (q *Queries) GetDeliveryTask(ctx context.Context, id string) (DeliveryTask, error) {
@@ -86,6 +86,7 @@ func (q *Queries) GetDeliveryTask(ctx context.Context, id string) (DeliveryTask,
 		&i.Status,
 		&i.LastAttemptAt,
 		&i.AttemptCount,
+		&i.NextAttemptAt,
 	)
 	return i, err
 }
@@ -130,8 +131,8 @@ func (q *Queries) ListDeliveryLogsForTask(ctx context.Context, deliveryTaskID st
 }
 
 const listPendingDeliveryTasks = `-- name: ListPendingDeliveryTasks :many
-SELECT id, subscription_id, payload, created_at, status, last_attempt_at, attempt_count FROM delivery_tasks
-WHERE status = 'pending'
+SELECT id, subscription_id, payload, created_at, status, last_attempt_at, attempt_count, next_attempt_at FROM delivery_tasks
+WHERE status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP)
 ORDER BY created_at ASC
 LIMIT 10
 `
@@ -153,6 +154,7 @@ func (q *Queries) ListPendingDeliveryTasks(ctx context.Context) ([]DeliveryTask,
 			&i.Status,
 			&i.LastAttemptAt,
 			&i.AttemptCount,
+			&i.NextAttemptAt,
 		); err != nil {
 			return nil, err
 		}
@@ -205,6 +207,22 @@ func (q *Queries) ListRecentDeliveryLogsForSubscription(ctx context.Context, sub
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateDeliveryTaskNextAttemptAt = `-- name: UpdateDeliveryTaskNextAttemptAt :exec
+UPDATE delivery_tasks
+SET next_attempt_at = ?
+WHERE id = ?
+`
+
+type UpdateDeliveryTaskNextAttemptAtParams struct {
+	NextAttemptAt sql.NullTime
+	ID            string
+}
+
+func (q *Queries) UpdateDeliveryTaskNextAttemptAt(ctx context.Context, arg UpdateDeliveryTaskNextAttemptAtParams) error {
+	_, err := q.db.ExecContext(ctx, updateDeliveryTaskNextAttemptAt, arg.NextAttemptAt, arg.ID)
+	return err
 }
 
 const updateDeliveryTaskStatus = `-- name: UpdateDeliveryTaskStatus :exec

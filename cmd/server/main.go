@@ -36,6 +36,9 @@ func main() {
         redisURL = "localhost:6379"
     }
     subCache := cache.NewRedisSubscriptionCache(redisURL, 5 * time.Minute)
+    if subCache == nil {
+        log.Fatalf("failed to initialize Redis cache")
+    }   
 
     subHandler := &api.SubscriptionHandler{
         Queries: queries,

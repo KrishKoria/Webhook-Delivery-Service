@@ -35,7 +35,7 @@ func RegisterUIRoutes(r *gin.Engine, h *UIHandler) {
     r.GET("/ui/subscriptions/:id/scheduled/list", h.ScheduledListPage) 
 }
 
-// List all subscriptions
+// ListSubscriptionsPage handles GET /ui/subscriptions
 func (h *UIHandler) ListSubscriptionsPage(c *gin.Context) {
     subs, err := h.Queries.ListSubscriptions(c)
     if err != nil {
@@ -46,11 +46,11 @@ func (h *UIHandler) ListSubscriptionsPage(c *gin.Context) {
         "Subscriptions": subs,
     })
 }
-
+// NewSubscriptionForm handles GET /ui/subscriptions/new
 func (h *UIHandler) NewSubscriptionForm(c *gin.Context) {
     c.HTML(http.StatusOK, "new_subscription.html", nil)
 }
-
+// EditSubscriptionForm handles GET /ui/subscriptions/:id/edit
 func (h *UIHandler) EditSubscriptionForm(c *gin.Context) {
     id := c.Param("id")
     sub, err := h.Queries.GetSubscription(c, id)
@@ -60,7 +60,7 @@ func (h *UIHandler) EditSubscriptionForm(c *gin.Context) {
     }
     c.HTML(200, "edit_subscription.html", gin.H{"Subscription": sub})
 }
-
+// CreateSubscriptionForm handles POST /ui/subscriptions/new
 func (h *UIHandler) CreateSubscriptionForm(c *gin.Context) {
     targetURL := c.PostForm("target_url")
     secret := c.PostForm("secret")
@@ -78,7 +78,7 @@ func (h *UIHandler) CreateSubscriptionForm(c *gin.Context) {
     }
     c.Redirect(http.StatusSeeOther, "/ui/subscriptions")
 }
-
+// UpdateSubscriptionForm handles POST /ui/subscriptions/:id/edit
 func (h *UIHandler) UpdateSubscriptionForm(c *gin.Context) {
     id := c.Param("id")
     targetURL := c.PostForm("target_url")
@@ -99,7 +99,7 @@ func (h *UIHandler) UpdateSubscriptionForm(c *gin.Context) {
     }
     c.Redirect(303, "/ui/subscriptions")
 }
-
+// DeleteSubscription handles POST /ui/subscriptions/:id/delete
 func (h *UIHandler) DeleteSubscription(c *gin.Context) {
     id := c.Param("id")
     err := h.Queries.DeleteSubscription(c, id)
@@ -112,7 +112,7 @@ func (h *UIHandler) DeleteSubscription(c *gin.Context) {
     }
     c.Redirect(303, "/ui/subscriptions")
 }
-
+// SubscriptionLogsPage handles GET /ui/subscriptions/:id/logs
 func (h *UIHandler) SubscriptionLogsPage(c *gin.Context) {
     id := c.Param("id")
     logs, err := h.Queries.ListRecentDeliveryLogsForSubscription(c, id)
@@ -143,7 +143,7 @@ func (h *UIHandler) SubscriptionLogsPage(c *gin.Context) {
         "Logs":           logsWithStatus,
     })
 }
-
+// SendTestWebhook handles POST /ui/subscriptions/:id/send
 func (h *UIHandler) SendTestWebhook(c *gin.Context) {
     id := c.Param("id")
     payload := c.PostForm("payload")
@@ -177,7 +177,7 @@ func (h *UIHandler) SendTestWebhook(c *gin.Context) {
 
     c.Redirect(http.StatusSeeOther, "/ui/subscriptions/"+id+"/logs")
 }
-
+// SubscriptionAnalyticsPage handles GET /ui/subscriptions/:id/analytics
 func (h *UIHandler) SubscriptionAnalyticsPage(c *gin.Context) {
     id := c.Param("id")
     logs, err := h.Queries.ListRecentDeliveryLogsForSubscription(c, id)
@@ -216,7 +216,7 @@ func (h *UIHandler) SubscriptionAnalyticsPage(c *gin.Context) {
         "Logs":           logs,
     })
 }
-
+// GetLogsJSON handles GET /api/subscriptions/:id/logs
 func (h *UIHandler) GetLogsJSON(c *gin.Context) {
     id := c.Param("id")
     logs, err := h.Queries.ListRecentDeliveryLogsForSubscription(c, id)
@@ -244,14 +244,14 @@ func (h *UIHandler) GetLogsJSON(c *gin.Context) {
 
     c.JSON(200, logsWithStatus)
 }
-
+// NewScheduledPage handles GET /ui/subscriptions/:id/scheduled/new
 func (h *UIHandler) NewScheduledPage(c *gin.Context) {
     subID := c.Param("id")
     c.HTML(http.StatusOK, "new_scheduled.html", gin.H{
         "SubscriptionID": subID,
     })
 }
-
+// ScheduledListPage handles GET /ui/subscriptions/:id/scheduled/list
 func (h *UIHandler) ScheduledListPage(c *gin.Context) {
     subID := c.Param("id")
     limit := int64(100)

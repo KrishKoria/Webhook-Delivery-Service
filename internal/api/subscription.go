@@ -24,7 +24,7 @@ func RegisterSubscriptionRoutes(r *gin.Engine, h *SubscriptionHandler) {
     r.PUT("/subscriptions/:id", h.UpdateSubscription)
     r.DELETE("/subscriptions/:id", h.DeleteSubscription)
 }
-
+// CreateSubscription handles POST /subscriptions
 func (h *SubscriptionHandler) CreateSubscription(c *gin.Context) {
     var req struct {
         TargetUrl  string `json:"target_url" binding:"required"`
