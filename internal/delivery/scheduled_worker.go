@@ -2,6 +2,7 @@ package delivery
 
 import (
 	"context"
+	"log"
 	"time"
 
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/database"
@@ -19,6 +20,7 @@ func NewScheduledWorker(queries *database.Queries) *ScheduledWorker {
 func (w *ScheduledWorker) Start(ctx context.Context) {
     ticker := time.NewTicker(10 * time.Second)
     defer ticker.Stop()
+    w.processDueScheduledWebhooks(ctx)
     for {
         select {
         case <-ticker.C:
@@ -33,7 +35,11 @@ func (w *ScheduledWorker) processDueScheduledWebhooks(ctx context.Context) {
     now := time.Now()
     tasks, err := w.Queries.GetDueScheduledWebhooks(ctx, now)
     if err != nil {
+        log.Printf("Scheduled Worker: Error fetching due webhooks: %v", err)
         return
+    }
+    if len(tasks) > 0 {
+        log.Printf("Scheduled Worker: Found %d due webhooks.", len(tasks))
     }
     for _, task := range tasks {
         deliveryTaskID := uuid.New().String()
@@ -43,6 +49,10 @@ func (w *ScheduledWorker) processDueScheduledWebhooks(ctx context.Context) {
             Payload:        task.Payload,
         })
         if err != nil {
+            _ = w.Queries.UpdateScheduledWebhookStatus(ctx, database.UpdateScheduledWebhookStatusParams{
+                Status: "failed", 
+                ID:     task.ID,
+            })
             continue
         }
 
@@ -72,7 +82,12 @@ func nextOccurrence(t time.Time, recurrence string) time.Time {
         return t.AddDate(0, 0, 7)
     case "monthly":
         return t.AddDate(0, 1, 0)
+    case "none":
+        return t
     default:
+        if recurrence != "" { 
+            log.Printf("Warning: Unknown recurrence type '%s' encountered. Treating as 'none'.", recurrence)
+        }
         return t
     }
 }

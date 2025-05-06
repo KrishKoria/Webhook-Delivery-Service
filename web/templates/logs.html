@@ -10,6 +10,7 @@
 
     <h2>Recent Delivery Logs</h2>
 <table border="1" cellpadding="5">
+    <thead>
     <tr>
         <th>Task ID</th>
         <th>Status</th>
@@ -19,6 +20,7 @@
         <th>HTTP Status</th>
         <th>Error</th>
     </tr>
+    </thead>
     <tbody id="logs-body">
     <!-- Logs will be inserted here -->
     </tbody>
@@ -27,21 +29,46 @@
 <script>
 function fetchLogs() {
     fetch('/api/subscriptions/{{.SubscriptionID}}/logs')
-        .then(response => response.json())
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+        })
         .then(logs => {
-            let html = '';
+            const tbody = document.getElementById('logs-body');
+            tbody.innerHTML = ''; 
+            if (!logs || logs.length === 0) {
+                const tr = tbody.insertRow();
+                const td = tr.insertCell();
+                td.colSpan = 7; 
+                td.textContent = 'No delivery logs found for this subscription.';
+                return;
+            }
             logs.forEach(log => {
-                html += `<tr>
-                        <td>${log.DeliveryTaskID}</td>
-                        <td>${log.status}</td>
-                        <td>${log.Timestamp}</td>
-                        <td>${log.AttemptNumber}</td>
-                        <td>${log.Outcome}</td>
-                        <td>${log.HttpStatus && log.HttpStatus.Valid ? log.HttpStatus.Int64 : '-'}</td>
-                        <td>${log.ErrorDetails && log.ErrorDetails.Valid ? log.ErrorDetails.String : '-'}</td>
-                    </tr>`;
+                const tr = tbody.insertRow();
+                
+                const addCell = (text) => {
+                    const cell = tr.insertCell();
+                    cell.textContent = text;
+                };
+
+                addCell(log.DeliveryTaskID);
+                addCell(log.TaskStatus && log.TaskStatus.Valid ? log.TaskStatus.String : '-'); 
+                addCell(new Date(log.Timestamp).toLocaleString()); 
+                addCell(log.AttemptNumber);
+                addCell(log.Outcome);
+                addCell(log.HttpStatus && log.HttpStatus.Valid ? log.HttpStatus.Int64 : '-');
+                addCell(log.ErrorDetails && log.ErrorDetails.Valid ? log.ErrorDetails.String : '-');
             });
-            document.getElementById('logs-body').innerHTML = html;
+        }).catch(error => {
+            console.error('Error fetching logs:', error);
+            const tbody = document.getElementById('logs-body');
+            tbody.innerHTML = ''; 
+            const tr = tbody.insertRow();
+            const td = tr.insertCell();
+            td.colSpan = 7; 
+            td.textContent = 'Error fetching logs. Please try again later.';
         });
 }
 

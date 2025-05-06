@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 
@@ -12,7 +13,6 @@ import (
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/database"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"golang.org/x/net/context"
 )
 
 type WebhookHandler struct {
@@ -30,28 +30,27 @@ func (h *WebhookHandler) IngestWebhook(c *gin.Context) {
     eventType := c.GetHeader("X-Event-Type")
     var sub database.Subscription
     var ok bool
-
-    if sub, ok = h.Cache.Get(subID); !ok {
-        var err error
+    var err error
+    if h.Cache != nil { 
+        sub, ok = h.Cache.Get(subID)
+    }
+    if !ok {
         sub, err = h.Queries.GetSubscription(c, subID)
         if err != nil {
+            log.Printf("Error fetching subscription %s from DB: %v", subID, err)
             c.JSON(http.StatusNotFound, gin.H{"error": "subscription not found"})
             return
         }
-        
-        h.Cache.Set(subID, sub)
+        if h.Cache != nil { 
+            h.Cache.Set(subID, sub)
+        }
     }
     body, err := io.ReadAll(c.Request.Body)
     if err != nil {
         c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
         return
     }
-
-    sub, err = h.Queries.GetSubscription(context.Background(), subID)
-    if err != nil {
-        c.JSON(http.StatusNotFound, gin.H{"error": "subscription not found"})
-        return
-    }
+    defer c.Request.Body.Close()
 
     if !subscriptionAllowsEvent(sub, eventType) {
         c.Status(http.StatusNoContent)
@@ -67,12 +66,13 @@ func (h *WebhookHandler) IngestWebhook(c *gin.Context) {
     }
 
     taskID := uuid.New().String()
-    err = h.Queries.CreateDeliveryTask(context.Background(), database.CreateDeliveryTaskParams{
+    err = h.Queries.CreateDeliveryTask(c, database.CreateDeliveryTaskParams{
         ID:             taskID,
         SubscriptionID: subID,
         Payload:        string(body),
     })
     if err != nil {
+        log.Printf("Error creating delivery task for subscription %s: %v", subID, err)
         c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to queue delivery"})
         return
     }

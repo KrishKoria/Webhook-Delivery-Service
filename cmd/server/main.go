@@ -34,10 +34,13 @@ func main() {
     redisURL := os.Getenv("REDIS_URL")
     if redisURL == "" {
         redisURL = "localhost:6379"
+    } else {
+        log.Printf("Using Redis URL: %s", redisURL)
     }
-    subCache := cache.NewRedisSubscriptionCache(redisURL, 5 * time.Minute)
-    if subCache == nil {
+    subCache, err := cache.NewRedisSubscriptionCache(redisURL, 5 * time.Minute)
+    if err != nil {
         log.Fatalf("failed to initialize Redis cache")
+        subCache = nil
     }   
 
     subHandler := &api.SubscriptionHandler{

@@ -28,9 +28,21 @@ WHERE delivery_task_id = ?
 ORDER BY attempt_number ASC;
 
 -- name: ListRecentDeliveryLogsForSubscription :many
-SELECT * FROM delivery_logs
-WHERE subscription_id = ?
-ORDER BY timestamp DESC
+SELECT
+    dl.id,
+    dl.delivery_task_id,
+    dl.subscription_id,
+    dl.target_url,
+    dl.timestamp,
+    dl.attempt_number,
+    dl.outcome,
+    dl.http_status,
+    dl.error_details,
+    dt.status AS task_status
+FROM delivery_logs dl
+LEFT JOIN delivery_tasks dt ON dl.delivery_task_id = dt.id
+WHERE dl.subscription_id = ?
+ORDER BY dl.timestamp DESC
 LIMIT 20;
 
 -- name: DeleteOldDeliveryLogs :exec
