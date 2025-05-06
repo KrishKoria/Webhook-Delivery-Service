@@ -170,21 +170,46 @@ func (q *Queries) ListPendingDeliveryTasks(ctx context.Context) ([]DeliveryTask,
 }
 
 const listRecentDeliveryLogsForSubscription = `-- name: ListRecentDeliveryLogsForSubscription :many
-SELECT id, delivery_task_id, subscription_id, target_url, timestamp, attempt_number, outcome, http_status, error_details FROM delivery_logs
-WHERE subscription_id = ?
-ORDER BY timestamp DESC
+SELECT
+    dl.id,
+    dl.delivery_task_id,
+    dl.subscription_id,
+    dl.target_url,
+    dl.timestamp,
+    dl.attempt_number,
+    dl.outcome,
+    dl.http_status,
+    dl.error_details,
+    dt.status AS task_status
+FROM delivery_logs dl
+LEFT JOIN delivery_tasks dt ON dl.delivery_task_id = dt.id
+WHERE dl.subscription_id = ?
+ORDER BY dl.timestamp DESC
 LIMIT 20
 `
 
-func (q *Queries) ListRecentDeliveryLogsForSubscription(ctx context.Context, subscriptionID string) ([]DeliveryLog, error) {
+type ListRecentDeliveryLogsForSubscriptionRow struct {
+	ID             string
+	DeliveryTaskID string
+	SubscriptionID string
+	TargetUrl      string
+	Timestamp      time.Time
+	AttemptNumber  int64
+	Outcome        string
+	HttpStatus     sql.NullInt64
+	ErrorDetails   sql.NullString
+	TaskStatus     sql.NullString
+}
+
+func (q *Queries) ListRecentDeliveryLogsForSubscription(ctx context.Context, subscriptionID string) ([]ListRecentDeliveryLogsForSubscriptionRow, error) {
 	rows, err := q.db.QueryContext(ctx, listRecentDeliveryLogsForSubscription, subscriptionID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []DeliveryLog
+	var items []ListRecentDeliveryLogsForSubscriptionRow
 	for rows.Next() {
-		var i DeliveryLog
+		var i ListRecentDeliveryLogsForSubscriptionRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.DeliveryTaskID,
@@ -195,6 +220,7 @@ func (q *Queries) ListRecentDeliveryLogsForSubscription(ctx context.Context, sub
 			&i.Outcome,
 			&i.HttpStatus,
 			&i.ErrorDetails,
+			&i.TaskStatus,
 		); err != nil {
 			return nil, err
 		}

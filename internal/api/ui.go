@@ -7,7 +7,6 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"net/http"
-	"time"
 
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/cache"
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/database"
@@ -122,26 +121,9 @@ func (h *UIHandler) SubscriptionLogsPage(c *gin.Context) {
         return
     }
 
-    type LogWithStatus struct {
-        database.DeliveryLog
-        TaskStatus string
-    }
-    var logsWithStatus []LogWithStatus
-    for _, logEntry := range logs {
-        task, err := h.Queries.GetDeliveryTask(c, logEntry.DeliveryTaskID)
-        status := "-"
-        if err == nil {
-            status = task.Status
-        }
-        logsWithStatus = append(logsWithStatus, LogWithStatus{
-            DeliveryLog: logEntry,
-            TaskStatus:  status,
-        })
-    }
-
     c.HTML(http.StatusOK, "logs.html", gin.H{
         "SubscriptionID": id,
-        "Logs":           logsWithStatus,
+        "Logs":           logs,
     })
 }
 // SendTestWebhook handles POST /ui/subscriptions/:id/send
@@ -187,35 +169,7 @@ func (h *UIHandler) SubscriptionAnalyticsPage(c *gin.Context) {
         return
     }
 
-    var total, success, failed int
-    var lastAttempt time.Time
-
-    for _, logEntry := range logs {
-        total++
-        if logEntry.Outcome == "success" {
-            success++
-        }
-        if logEntry.Outcome == "failed_attempt" || logEntry.Outcome == "failure" {
-            failed++
-        }
-        if logEntry.Timestamp.After(lastAttempt) {
-            lastAttempt = logEntry.Timestamp
-        }
-    }
-
-    var lastAttemptStr string
-    if !lastAttempt.IsZero() {
-        lastAttemptStr = lastAttempt.Format(time.RFC3339)
-    }
-
-    c.HTML(http.StatusOK, "analytics.html", gin.H{
-        "SubscriptionID": id,
-        "Total":          total,
-        "Success":        success,
-        "Failed":         failed,
-        "LastAttempt":    lastAttemptStr,
-        "Logs":           logs,
-    })
+    c.JSON(http.StatusOK, logs)
 }
 // GetLogsJSON handles GET /api/subscriptions/:id/logs
 func (h *UIHandler) GetLogsJSON(c *gin.Context) {
@@ -226,24 +180,7 @@ func (h *UIHandler) GetLogsJSON(c *gin.Context) {
         return
     }
 
-    type LogWithStatus struct {
-        database.DeliveryLog
-        TaskStatus string `json:"status"`
-    }
-    var logsWithStatus []LogWithStatus
-    for _, logEntry := range logs {
-        status := "-"
-        task, err := h.Queries.GetDeliveryTask(c, logEntry.DeliveryTaskID)
-        if err == nil {
-            status = task.Status
-        }
-        logsWithStatus = append(logsWithStatus, LogWithStatus{
-            DeliveryLog: logEntry,
-            TaskStatus:  status,
-        })
-    }
-
-    c.JSON(200, logsWithStatus)
+    c.JSON(200, logs)
 }
 // NewScheduledPage handles GET /ui/subscriptions/:id/scheduled/new
 func (h *UIHandler) NewScheduledPage(c *gin.Context) {

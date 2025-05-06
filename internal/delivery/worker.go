@@ -20,10 +20,11 @@ const (
 type Worker struct {
     Queries *database.Queries
     Cache   *cache.RedisSubscriptionCache
+    HTTPClient *http.Client 
 }
 
 func NewWorker(queries *database.Queries, cache *cache.RedisSubscriptionCache) *Worker {
-    return &Worker{Queries: queries, Cache: cache}
+    return &Worker{Queries: queries, Cache: cache, HTTPClient: &http.Client{Timeout: 10 * time.Second}}
 }
 
 func (w *Worker) Start(ctx context.Context) {
@@ -50,7 +51,10 @@ func (w *Worker) processPendingTasks(ctx context.Context) {
     for _, task := range tasks {
         var sub database.Subscription
         var ok bool
-        if sub, ok = w.Cache.Get(task.SubscriptionID); !ok {
+        if w.Cache != nil {
+            sub, ok = w.Cache.Get(task.SubscriptionID)
+       }
+        if !ok {
             sub, err = w.Queries.GetSubscription(ctx, task.SubscriptionID)
             if err != nil {
                 log.Printf("error fetching subscription for task %s: %v", task.ID, err)
@@ -59,7 +63,7 @@ func (w *Worker) processPendingTasks(ctx context.Context) {
             w.Cache.Set(task.SubscriptionID, sub)
         }
 
-        status, httpStatus, errMsg := deliverWebhook(sub.TargetUrl, []byte(task.Payload))
+        status, httpStatus, errMsg := w.deliverWebhook(sub.TargetUrl, []byte(task.Payload))
         attempt := task.AttemptCount + 1
 
         err = w.Queries.CreateDeliveryLog(ctx, database.CreateDeliveryLogParams{
@@ -153,9 +157,8 @@ func (w *Worker) processPendingTasks(ctx context.Context) {
     }
 }
 
-func deliverWebhook(targetURL string, payload []byte) (status string, httpStatus int, errMsg string) {
-    client := &http.Client{Timeout: 10 * time.Second}
-    resp, err := client.Post(targetURL, "application/json", bytes.NewReader(payload))
+func(w *Worker) deliverWebhook(targetURL string, payload []byte) (status string, httpStatus int, errMsg string) {
+    resp, err := w.HTTPClient.Post(targetURL, "application/json", bytes.NewBuffer(payload))
     if err != nil {
         return "failed_attempt", 0, err.Error()
     }
