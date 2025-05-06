@@ -26,6 +26,7 @@ func RegisterUIRoutes(r *gin.Engine, h *UIHandler) {
     r.POST("/ui/subscriptions/new", h.CreateSubscriptionForm)
     r.GET("/ui/subscriptions/:id/logs", h.SubscriptionLogsPage)
     r.POST("/ui/subscriptions/:id/send", h.SendTestWebhook)
+    r.GET("/ui/subscriptions/:id/test", h.TestWebhookForm) 
     r.GET("/ui/subscriptions/:id/analytics", h.SubscriptionAnalyticsPage)
     r.GET("/api/subscriptions/:id/logs", h.GetLogsJSON)
     r.GET("/ui/subscriptions/:id/edit", h.EditSubscriptionForm)
@@ -274,5 +275,12 @@ func (h *UIHandler) ScheduledListPage(c *gin.Context) {
     c.HTML(http.StatusOK, "scheduled_list.html", gin.H{
         "SubscriptionID":    subID,
         "ScheduledWebhooks": scheduledItems,
+    })
+}
+// TestWebhookForm handles GET /ui/subscriptions/:id/test
+func (h *UIHandler) TestWebhookForm(c *gin.Context) {
+    subID := c.Param("id")
+    c.HTML(http.StatusOK, "send_test.html", gin.H{
+        "SubscriptionID": subID,
     })
 }
