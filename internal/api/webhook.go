@@ -24,7 +24,7 @@ type WebhookHandler struct {
 func RegisterWebhookRoutes(r *gin.Engine, h *WebhookHandler) {
     r.POST("/ingest/:subscription_id", h.IngestWebhook)
 }
-
+// IngestWebhook handles incoming webhooks.
 func (h *WebhookHandler) IngestWebhook(c *gin.Context) {
     subID := c.Param("subscription_id")
     eventType := c.GetHeader("X-Event-Type")

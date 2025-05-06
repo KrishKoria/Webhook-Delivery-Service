@@ -1,6 +1,6 @@
 -- name: ListPendingDeliveryTasks :many
 SELECT * FROM delivery_tasks
-WHERE status = 'pending'
+WHERE status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP)
 ORDER BY created_at ASC
 LIMIT 10;
 
@@ -36,3 +36,8 @@ LIMIT 20;
 -- name: DeleteOldDeliveryLogs :exec
 DELETE FROM delivery_logs
 WHERE timestamp < datetime('now', '-72 hours');
+
+-- name: UpdateDeliveryTaskNextAttemptAt :exec
+UPDATE delivery_tasks
+SET next_attempt_at = ?
+WHERE id = ?;

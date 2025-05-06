@@ -19,7 +19,7 @@ func NewRedisSubscriptionCache(redisURL string, ttl time.Duration) *RedisSubscri
     opts, err := redis.ParseURL(redisURL)
     if err != nil {
         log.Printf("Invalid REDIS_URL: %v", err)
-        return &RedisSubscriptionCache{client: nil, ttl: ttl}
+        return nil
     }
     client := redis.NewClient(opts)
     ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

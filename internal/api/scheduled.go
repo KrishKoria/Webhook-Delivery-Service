@@ -27,7 +27,7 @@ type CreateScheduledRequest struct {
     ScheduledFor   time.Time `json:"scheduled_for"`
     Recurrence     string    `json:"recurrence"` 
 }
-
+// CreateScheduled handles POST /scheduled
 func (h *ScheduledHandler) CreateScheduled(c *gin.Context) {
     subscriptionID := c.PostForm("subscription_id")
     payload := c.PostForm("payload")
@@ -43,6 +43,10 @@ func (h *ScheduledHandler) CreateScheduled(c *gin.Context) {
     if err != nil {
         log.Printf("Error parsing scheduled_for time '%s': %v", scheduledForStr, err)
         c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid scheduled_for date format. Use YYYY-MM-DDTHH:MM."})
+        return
+    }
+    if scheduledFor.Before(time.Now()) {
+        c.JSON(http.StatusBadRequest, gin.H{"error": "Scheduled time must be in the future"})
         return
     }
 
@@ -63,7 +67,7 @@ func (h *ScheduledHandler) CreateScheduled(c *gin.Context) {
     redirectURL := "/ui/subscriptions/"
     c.Redirect(http.StatusFound, redirectURL)
 }
-
+// ListScheduled handles GET /scheduled
 func (h *ScheduledHandler) ListScheduled(c *gin.Context) {
     subID := c.Query("subscription_id") 
     limit := int64(1000) 
@@ -103,7 +107,7 @@ func (h *ScheduledHandler) ListScheduled(c *gin.Context) {
     c.Header("Expires", "0")
     c.JSON(http.StatusOK, tasks)
 }
-
+// DeleteScheduled handles DELETE /scheduled/:id
 func (h *ScheduledHandler) DeleteScheduled(c *gin.Context) {
     id := c.Param("id")
     err := h.Queries.DeleteScheduledWebhook(c, id)
