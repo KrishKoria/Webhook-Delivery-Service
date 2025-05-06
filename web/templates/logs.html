@@ -7,16 +7,6 @@
 <body>
     <h1>Delivery Logs for Subscription {{.SubscriptionID}}</h1>
     <a href="/ui/subscriptions">Back to Subscriptions</a>
-    <h2>Send Test Webhook</h2>
-    <form method="POST" action="/ui/subscriptions/{{.SubscriptionID}}/send" id="send-webhook-form">
-    <label>Event Type:<br>
-        <input type="text" name="event_type" value="order.created">
-    </label><br>
-    <label>Payload (JSON):<br>
-        <textarea name="payload" rows="4" cols="60">{ "event": "test" }</textarea>
-    </label><br>
-    <button type="submit">Send Webhook</button>
-    </form>
 
     <h2>Recent Delivery Logs</h2>
 <table border="1" cellpadding="5">
@@ -55,9 +45,8 @@ function fetchLogs() {
         });
 }
 
-// Initial fetch and then poll every 5 seconds
 fetchLogs();
-setInterval(fetchLogs, 5000);
+setInterval(fetchLogs, 2000);
 </script>
 </body>
 </html>

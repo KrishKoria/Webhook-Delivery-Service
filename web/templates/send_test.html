@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Send Test Webhook</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <h1>Send Test Webhook for Subscription {{.SubscriptionID}}</h1>
+    <a href="/ui/subscriptions">Back to Subscriptions</a>
+    
+    <form method="POST" action="/ui/subscriptions/{{.SubscriptionID}}/send" id="send-webhook-form">
+        <label>Event Type:<br>
+            <input type="text" name="event_type" value="order.created">
+        </label><br>
+        <label>Payload (JSON):<br>
+            <textarea name="payload" rows="4" cols="60">{ "event": "test" }</textarea>
+        </label><br>
+        <button type="submit">Send Webhook</button>
+    </form>
+</body>
+</html>
