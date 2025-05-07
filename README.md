@@ -59,6 +59,33 @@
 
  ---
 
+ ## Local Database Setup
+
+For local development, you should use a SQLite file.
+
+In your `.env` file, set:
+```sh
+TURSO_DATABASE_URL=file:local.db
+TURSO_AUTH_TOKEN=
+```
+This tells the app to use a local SQLite database file named `local.db`.
+You can leave `TURSO_AUTH_TOKEN` blank for local SQLite.
+
+### If you want to use Turso Cloud:
+
+1. Create a Turso account
+2. Create a database and get your connection URL and auth token from the Turso dashboard.
+
+Then set these in your `.env` file:
+```sh
+TURSO_DATABASE_URL=<your_turso_database_url>
+TURSO_AUTH_TOKEN=<your_turso_auth_token>
+```
+> Note:
+> The database URL must start with a valid scheme like `libsql:`, `https:`, etc.
+> If you use just a filename (like `local.db`), it will not work. Always use the correct scheme!
+
+---
  ## Database Schema & Indexing
 
  - **subscriptions:**  
