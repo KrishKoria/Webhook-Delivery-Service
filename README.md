@@ -14,12 +14,11 @@
  - Dead Letter Queue for failed deliveries (manual retry via UI).
  ---
 
- ## Setup & Run Locally (Docker)
+## Setup & Run Locally (Docker)
 
 **Prerequisites:**
 - Docker installed
 - Docker Compose installed
-- Redis (optional, for caching)
 - Turso CLI (optional, for local SQLite or Turso Cloud setup)
 
  1. **Clone the repository:**
@@ -32,15 +31,19 @@
     ```bash
     cp .env.example .env
     ```
-    - Configure your database and Redis settings in the `.env` file, Refer to the **"Environment Variables"** section below for details.
+    - Configure your database settings in the `.env` file. Refer to the **"Environment Variables"** section below for details.
     
       - For `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`, see the **"Local Database Setup"** section below for guidance on SQLite (local) or Turso Cloud.
-      - For `REDIS_URL`, refer to the **"Redis Caching"** section if you plan to use Redis.
+      - For `REDIS_URL`:
+        - **Local Docker Development:** This is now optional. If `REDIS_URL` is not set or is empty in your `.env` file, the application will default to using the Redis service defined in `docker-compose.yml` (`redis://redis:6379/0`).
+        - **External Redis (e.g., Upstash):** Set `REDIS_URL` in your `.env` file to connect to your cloud Redis provider. See the **"Redis Caching"** section.
 
- 3. **Build and start the service:**
+ 3. **Build and start the service (includes Redis):**
     ```bash
     docker-compose up --build
     ```
+    This command will also start a local Redis container.
+
 
  4. **Access the app:**
     - Open [http://localhost:8080](http://localhost:8080) (redirects to `/ui/subscriptions`).
@@ -59,7 +62,9 @@ The application uses the following environment variables for configuration:
 
 - `TURSO_DATABASE_URL`: The connection URL for your Turso database (or `file:local.db` for local SQLite).
 - `TURSO_AUTH_TOKEN`: The authentication token for your Turso database (can be empty for local SQLite).
-- `REDIS_URL`: The connection URL for your Redis instance (e.g., `redis://localhost:6379/0` or a cloud provider URL).
+- `REDIS_URL`: (Optional for local Docker setup) The connection URL for your Redis instance.
+    - If running with `docker-compose` and this variable is empty or not set in `.env`, it defaults to the internal Docker Redis service (`redis://redis:6379/0`).
+    - For external Redis providers (e.g., Upstash), set this to your provider's URL (e.g., `rediss://:<password>@<host>:6379`).
 - `PORT`: (Optional) The port on which the HTTP server will listen. Defaults to `8080`.
 
 ---
@@ -78,6 +83,14 @@ The application uses the following environment variables for configuration:
  - **Observability:** Health check endpoint, structured logging
 
  ---
+## Redis Caching
+
+- The application uses Redis for subscription caching.
+- **Local Docker Development:** `docker-compose.yml` includes a Redis service. If `REDIS_URL` is not set or is empty in your `.env` file, the application will automatically connect to this local Redis service (`redis://redis:6379/0`).
+- **External Redis (Upstash, Redis Cloud, etc.):**
+    - To use an external Redis provider, set the `REDIS_URL` in your `.env` file (e.g., `rediss://:<password>@<host>:6379` for Upstash). This will override the local Docker Redis configuration.
+    - No separate local Redis container is needed if you are using a cloud provider.
+---
 
  ## Local Database Setup
 
