@@ -16,6 +16,12 @@
 
  ## Setup & Run Locally (Docker)
 
+**Prerequisites:**
+- Docker installed
+- Docker Compose installed
+- Redis (optional, for caching)
+- Turso CLI (optional, for local SQLite or Turso Cloud setup)
+
  1. **Clone the repository:**
     ```bash
     git clone https://github.com/KrishKoria/Webhook-Delivery-Service.git
@@ -26,7 +32,8 @@
     ```bash
     cp .env.example .env
     ```
-    - Configure your database and Redis settings in the `.env` file.
+    - Configure your database and Redis settings in the `.env` file, Refer to the **"Environment Variables"** section below for details.
+    
       - For `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`, see the **"Local Database Setup"** section below for guidance on SQLite (local) or Turso Cloud.
       - For `REDIS_URL`, refer to the **"Redis Caching"** section if you plan to use Redis.
 
@@ -44,7 +51,18 @@
 
  [Live Application Link](https://webhook-delivery-110005729669.us-central1.run.app/ui/subscriptions)
 
- ---
+---
+
+## Environment Variables
+
+The application uses the following environment variables for configuration:
+
+- `TURSO_DATABASE_URL`: The connection URL for your Turso database (or `file:local.db` for local SQLite).
+- `TURSO_AUTH_TOKEN`: The authentication token for your Turso database (can be empty for local SQLite).
+- `REDIS_URL`: The connection URL for your Redis instance (e.g., `redis://localhost:6379/0` or a cloud provider URL).
+- `PORT`: (Optional) The port on which the HTTP server will listen. Defaults to `8080`.
+
+---
 
  ## Architecture Choices
 
@@ -122,8 +140,8 @@ TURSO_AUTH_TOKEN=<your_turso_auth_token>
  ### Update a Subscription
  ```bash
  curl -X PUT http://localhost:8080/subscriptions/<id> \
-   -H "Content-Type: application/json" \
-   -d '{"target_url":"https://webhook.site/your-url","secret":"newsecret","event_types":"order.created"}'
+  -H "Content-Type: application/json" \
+  -d '{"target_url":"https://webhook.site/your-new-url","secret":"newsecret","event_types":"order.updated,user.deleted"}'
  ```
 
  ### Delete a Subscription
