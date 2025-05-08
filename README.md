@@ -79,33 +79,73 @@ The application uses the following environment variables for configuration:
 
  ---
 
- ## Local Database Setup (Not Recommended)
+ ## Local Database Setup
 
-For local development, you should use a SQLite file.
+While **Turso Cloud is the recommended method** for a more robust development experience (see below), you can use a local SQLite file for quick local testing, especially when running with Docker.
 
-In your `.env` file, set:
-```bash
-TURSO_DATABASE_URL=file:local.db
-TURSO_AUTH_TOKEN=
-```
-This tells the app to use a local SQLite database file named `local.db`.
-You can leave `TURSO_AUTH_TOKEN` blank for local SQLite.
+### Using a Local SQLite File with Docker (for quick testing, not recommended for data persistence)
 
-### If you want to use Turso Cloud (Recommended Method):
+When you run the application using `docker-compose up`, you can configure it to use a local SQLite database file. This file will be created *inside* the Docker container.
 
-1. Create a Turso account
-2. Create a database and get your connection URL and auth token from the Turso dashboard.
+1.  **Configure your `.env` file:**
+    Make sure your `.env` file (copied from `.env.example`) has the following settings:
+    ```bash
+    TURSO_DATABASE_URL=file:local.db
+    TURSO_AUTH_TOKEN=
+    # ... other variables like REDIS_URL, PORT ...
+    ```
+    *   `TURSO_DATABASE_URL=file:local.db`: This tells the application to use/create a SQLite database file named `local.db`.
+    *   `TURSO_AUTH_TOKEN=`: This **must be empty** for local SQLite file usage.
 
-Then set these in your `.env` file:
-```bash
-TURSO_DATABASE_URL=<your_turso_database_url>
-TURSO_AUTH_TOKEN=<your_turso_auth_token>
-```
-> Note:
-> The database URL must start with a valid scheme like `libsql:`, `https:`, etc.
-> If you use just a filename (like `local.db`), it will not work. Always use the correct scheme!
+2.  **How it works with Docker:**
+    *   When you run `docker-compose up --build`, the application inside the Docker container will use `local.db`.
+    *   The database migrations will be applied to this `local.db` file within the container.
+    *   **Important:** By default, this `local.db` file exists only within the Docker container's filesystem. If you run `docker-compose down` (which removes the container), this `local.db` file and all its data will be **lost**.
+
+3.  **(Optional) Persisting `local.db` with Docker Volumes:**
+    If you need the `local.db` data to persist across container restarts or `docker-compose down/up` cycles, you would need to modify your `docker-compose.yml` to map a volume to where `local.db` is stored within the container (e.g., `/app/local.db` if your `WORKDIR` is `/app`). This is a more advanced Docker setup.
+    Example snippet for `docker-compose.yml`:
+    ```yaml
+    services:
+      app:
+        # ... other app configurations ...
+        volumes:
+          - ./data/sqlite:/app/data # Assuming local.db is created at /app/data/local.db
+                                    # or adjust path as needed.
+                                    # Ensure TURSO_DATABASE_URL=file:/app/data/local.db
+    ```
+    *Note: If you use a volume, ensure the path in `TURSO_DATABASE_URL` matches the path inside the container where the volume is mounted, e.g., `TURSO_DATABASE_URL=file:/app/data/local.db`.*
+
+**Limitations of local SQLite file with Docker (without persistent volumes):**
+*   Data is ephemeral and lost when the container is removed.
+*   Accessing and inspecting the `local.db` file directly from your host machine is more complex as it resides inside the container.
+
+For these reasons, for any development beyond very quick, isolated tests, using Turso Cloud is strongly recommended.
+
+### Using Turso Cloud (Recommended Method)
+
+1.  **Create a Turso account:**
+    Sign up at [Turso](https://turso.tech/).
+
+2.  **Install the Turso CLI and create a database:**
+    Follow the Turso documentation to install their CLI and create a new database.
+
+3.  **Get your database URL and auth token:**
+    The Turso CLI will provide you with a database URL (e.g., `libsql://your-db-name-username.turso.io`) and you can generate an auth token.
+
+4.  **Set these in your `.env` file:**
+    ```bash
+    TURSO_DATABASE_URL=<your_turso_database_url_from_cli>
+    TURSO_AUTH_TOKEN=<your_turso_auth_token_from_cli>
+    # ... other variables ...
+    ```
+
+> **Important Note on Database URLs:**
+> The database URL provided to the application (whether local or remote) must start with a valid scheme like `file:`, `libsql:`, or `https:`.
+> If you use just a filename (like `local.db`) without the `file:` prefix for `TURSO_DATABASE_URL`, it will likely not work correctly with the database driver. Always use the correct scheme!
 
 ---
+
  ## Database Schema & Indexing
 
  - **subscriptions:**  
