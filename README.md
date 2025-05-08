@@ -79,7 +79,7 @@ The application uses the following environment variables for configuration:
 
  ---
 
- ## Local Database Setup
+ ## Local Database Setup (Not Recommended)
 
 For local development, you should use a SQLite file.
 
@@ -91,7 +91,7 @@ TURSO_AUTH_TOKEN=
 This tells the app to use a local SQLite database file named `local.db`.
 You can leave `TURSO_AUTH_TOKEN` blank for local SQLite.
 
-### If you want to use Turso Cloud:
+### If you want to use Turso Cloud (Recommended Method):
 
 1. Create a Turso account
 2. Create a database and get your connection URL and auth token from the Turso dashboard.
