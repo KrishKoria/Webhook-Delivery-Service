@@ -17,19 +17,21 @@
  ## Setup & Run Locally (Docker)
 
  1. **Clone the repository:**
-    ```sh
+    ```bash
     git clone https://github.com/KrishKoria/Webhook-Delivery-Service.git
     cd Webhook-Delivery-Service
     ```
 
  2. **Copy and edit the example environment file:**
-    ```sh
+    ```bash
     cp .env.example .env
     ```
-    - Set `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` (Turso, SQLite, or Postgres) and `REDIS_URL` (Upstash, Redis Cloud, etc.) in `.env`.
+    - Configure your database and Redis settings in the `.env` file.
+      - For `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`, see the **"Local Database Setup"** section below for guidance on SQLite (local) or Turso Cloud.
+      - For `REDIS_URL`, refer to the **"Redis Caching"** section if you plan to use Redis.
 
  3. **Build and start the service:**
-    ```sh
+    ```bash
     docker-compose up --build
     ```
 
@@ -64,7 +66,7 @@
 For local development, you should use a SQLite file.
 
 In your `.env` file, set:
-```sh
+```bash
 TURSO_DATABASE_URL=file:local.db
 TURSO_AUTH_TOKEN=
 ```
@@ -77,7 +79,7 @@ You can leave `TURSO_AUTH_TOKEN` blank for local SQLite.
 2. Create a database and get your connection URL and auth token from the Turso dashboard.
 
 Then set these in your `.env` file:
-```sh
+```bash
 TURSO_DATABASE_URL=<your_turso_database_url>
 TURSO_AUTH_TOKEN=<your_turso_auth_token>
 ```
@@ -182,7 +184,7 @@ TURSO_AUTH_TOKEN=<your_turso_auth_token>
    Use the provided `REDIS_URL` from Upstash in your `.env`.
  - **Docker Hub:**  
    Build and push your image:
-   ```sh
+   ```bash
    docker build -t <your-dockerhub-username>/webhook-delivery-service:latest .
    docker push <your-dockerhub-username>/webhook-delivery-service:latest
    ```
@@ -211,7 +213,7 @@ TURSO_AUTH_TOKEN=<your_turso_auth_token>
 
  Replace `<YOUR_PROJECT_ID>` and `<YOUR_IMAGE_NAME>` with your values.
 
- ```sh
+ ```bash
  # Authenticate Docker with Google
  gcloud auth configure-docker
 
@@ -223,7 +225,7 @@ TURSO_AUTH_TOKEN=<your_turso_auth_token>
  ```
  ### 2. **Deploy to Cloud Run**
 
- ```sh
+ ```bash
 
  gcloud run deploy webhook-delivery-service \
    --image gcr.io/<YOUR_PROJECT_ID>/<YOUR_IMAGE_NAME>:latest \
@@ -235,7 +237,7 @@ TURSO_AUTH_TOKEN=<your_turso_auth_token>
 
  ### 3. **Access the Service**
  After deployment, you will receive a URL for your service. You can access the UI and API at 
- ```sh
+ ```bash
  https://<your-cloud-run-url>/ui/subscriptions
  ```
 
