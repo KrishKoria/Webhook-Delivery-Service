@@ -4,8 +4,6 @@ import (
 	"database/sql"
 	"net/http"
 
-	"context"
-
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/cache"
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/database"
 	"github.com/gin-gonic/gin"
@@ -51,7 +49,7 @@ func (h *SubscriptionHandler) CreateSubscription(c *gin.Context) {
 
 // ListSubscriptions handles GET /subscriptions
 func (h *SubscriptionHandler) ListSubscriptions(c *gin.Context) {
-    subs, err := h.Queries.ListSubscriptions(context.Background())
+    subs, err := h.Queries.ListSubscriptions(c)
     if err != nil {
         c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
         return
@@ -62,7 +60,7 @@ func (h *SubscriptionHandler) ListSubscriptions(c *gin.Context) {
 // GetSubscription handles GET /subscriptions/:id
 func (h *SubscriptionHandler) GetSubscription(c *gin.Context) {
     id := c.Param("id")
-    sub, err := h.Queries.GetSubscription(context.Background(), id)
+    sub, err := h.Queries.GetSubscription(c, id)
     if err != nil {
         c.JSON(http.StatusNotFound, gin.H{"error": "subscription not found"})
         return
@@ -76,6 +74,7 @@ func (h *SubscriptionHandler) UpdateSubscription(c *gin.Context) {
     var req struct {
         TargetURL string `json:"target_url" binding:"required"`
         Secret    string `json:"secret"`
+        EventTypes string `json:"event_types"` 
     }
     if err := c.ShouldBindJSON(&req); err != nil {
         c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -83,13 +82,17 @@ func (h *SubscriptionHandler) UpdateSubscription(c *gin.Context) {
     }
     arg := database.UpdateSubscriptionParams{
         TargetUrl: req.TargetURL,
+        EventTypes: sql.NullString{
+            String: req.EventTypes,
+            Valid:  req.EventTypes != "",
+        },
 		Secret: sql.NullString{
 			String: req.Secret,
 			Valid:  req.Secret != "",
 		},
         ID:        id,
     }
-    if err := h.Queries.UpdateSubscription(context.Background(), arg); err != nil {
+    if err := h.Queries.UpdateSubscription(c, arg); err != nil {
         c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
         return
     }
@@ -102,7 +105,7 @@ func (h *SubscriptionHandler) UpdateSubscription(c *gin.Context) {
 // DeleteSubscription handles DELETE /subscriptions/:id
 func (h *SubscriptionHandler) DeleteSubscription(c *gin.Context) {
     id := c.Param("id")
-    if err := h.Queries.DeleteSubscription(context.Background(), id); err != nil {
+    if err := h.Queries.DeleteSubscription(c, id); err != nil {
         c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
         return
     }
