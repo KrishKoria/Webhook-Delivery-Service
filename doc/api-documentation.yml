@@ -1,0 +1,113 @@
+openapi: 3.0.3
+info:
+  title: Webhook Delivery Service API
+  version: 1.0.0
+  description: API for managing webhook subscriptions and deliveries.
+servers:
+  - url: http://localhost:8080
+paths:
+  /subscriptions:
+    get:
+      summary: List all subscriptions
+      responses:
+        '200':
+          description: List of subscriptions
+    post:
+      summary: Create a new subscription
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubscriptionCreate'
+      responses:
+        '201':
+          description: Subscription created
+  /subscriptions/{id}:
+    put:
+      summary: Update a subscription
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubscriptionUpdate'
+      responses:
+        '200':
+          description: Subscription updated
+    delete:
+      summary: Delete a subscription
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Subscription deleted
+  /ingest/{subscription_id}:
+    post:
+      summary: Ingest a webhook event
+      parameters:
+        - in: path
+          name: subscription_id
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: X-Event-Type
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: X-Hub-Signature-256
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '202':
+          description: Webhook accepted for delivery
+  /healthz:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: Service is healthy
+
+components:
+  schemas:
+    SubscriptionCreate:
+      type: object
+      properties:
+        target_url:
+          type: string
+        secret:
+          type: string
+        event_types:
+          type: string
+      required:
+        - target_url
+        - secret
+        - event_types
+    SubscriptionUpdate:
+      type: object
+      properties:
+        target_url:
+          type: string
+        secret:
+          type: string
+        event_types:
+          type: string
