@@ -36,7 +36,7 @@ jobs:
         uses: bump-sh/github-action@v1
         with:
           doc: webhook-delivery
-          token: ${{secrets.DEPLOY_TOKEN}}
+          token: ${{secrets.DEPLOY_TOKEN }}
           file: doc/api-documentation.yml
           command: diff
         env:
