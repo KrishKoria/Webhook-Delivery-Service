@@ -23,7 +23,7 @@ jobs:
         uses: bump-sh/github-action@v1
         with:
           doc: webhook-delivery
-          token: oDzSDr57CZntGNmBi2d5zazU2Uj5QpgX
+          token: ${{ secrets.DEPLOY_TOKEN }}
           file: doc/api-documentation.yml
   api-diff:
     if: ${{ github.event_name == 'pull_request' }}
@@ -36,7 +36,7 @@ jobs:
         uses: bump-sh/github-action@v1
         with:
           doc: webhook-delivery
-          token: ${{secrets.DEPLOY_TOKEN }}
+          token: ${{ secrets.DEPLOY_TOKEN }}
           file: doc/api-documentation.yml
           command: diff
         env:

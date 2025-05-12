@@ -30,7 +30,7 @@ tags:
   - name: Analytics & Delivery Logs
     description: Access delivery task statuses and logs
   - name: Dead Letter Queue (DLQ)
-    description: 'Manage failed deliveries (Note: Current DLQ routes are UI-focused)''
+    description: 'Manage failed deliveries (Note: Current DLQ routes are UI-focused)'
   - name: Health
     description: Service health checks
 
