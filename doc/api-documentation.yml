@@ -1,37 +1,82 @@
 openapi: 3.0.3
 info:
   title: Webhook Delivery Service API
-  version: 1.0.0
-  description: API for managing webhook subscriptions and deliveries.
+  version: 1.1.0
+  description: |
+    The Webhook Delivery Service provides robust management of webhook subscriptions, event ingestion, delivery retries, analytics, scheduled webhooks, and a dead letter queue.  
+    **Features:**  
+    - Subscription CRUD  
+    - HMAC signature verification  
+    - Asynchronous delivery with retries  
+    - Delivery analytics  
+    - Scheduled webhooks  
+    - Dead Letter Queue (DLQ)  
+    - Redis-backed caching  
+    - Minimal UI endpoints  
+    - Health checks  
+    <br>
+    [View UI](http://localhost:8080/ui/subscriptions)
 servers:
   - url: http://localhost:8080
+    description: Local development server
+
 paths:
   /subscriptions:
     get:
-      summary: List all subscriptions
+      summary: List all webhook subscriptions
+      description: Retrieve all webhook subscriptions with their configuration and metadata.
       responses:
         '200':
           description: List of subscriptions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Subscription'
     post:
-      summary: Create a new subscription
+      summary: Create a new webhook subscription
+      description: Register a new webhook subscription to receive events.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/SubscriptionCreate'
+            example:
+              target_url: "https://webhook.site/your-url"
+              secret: "mysecret"
+              event_types: "order.created,user.updated"
       responses:
         '201':
           description: Subscription created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        '400':
+          description: Invalid input
+
   /subscriptions/{id}:
+    get:
+      summary: Get a subscription
+      description: Retrieve details for a specific subscription by its ID.
+      parameters:
+        - $ref: '#/components/parameters/SubscriptionId'
+      responses:
+        '200':
+          description: Subscription details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        '404':
+          description: Subscription not found
     put:
       summary: Update a subscription
+      description: Update the configuration of an existing subscription.
       parameters:
-        - in: path
-          name: id
-          required: true
-          schema:
-            type: string
+        - $ref: '#/components/parameters/SubscriptionId'
       requestBody:
         required: true
         content:
@@ -41,73 +86,416 @@ paths:
       responses:
         '200':
           description: Subscription updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        '404':
+          description: Subscription not found
     delete:
       summary: Delete a subscription
+      description: Remove a subscription and stop delivering events to its target URL.
       parameters:
-        - in: path
-          name: id
-          required: true
-          schema:
-            type: string
+        - $ref: '#/components/parameters/SubscriptionId'
       responses:
         '204':
           description: Subscription deleted
+        '404':
+          description: Subscription not found
+
   /ingest/{subscription_id}:
     post:
       summary: Ingest a webhook event
+      description: |
+        Accept an event for a specific subscription.  
+        Requires HMAC signature and event type headers.
       parameters:
-        - in: path
-          name: subscription_id
-          required: true
-          schema:
-            type: string
+        - $ref: '#/components/parameters/SubscriptionIdPath'
         - in: header
           name: X-Event-Type
           required: true
           schema:
             type: string
+          description: The type of event being delivered (e.g., order.created).
         - in: header
           name: X-Hub-Signature-256
           required: true
           schema:
             type: string
+          description: HMAC SHA256 signature of the request body, prefixed with "sha256=".
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
+              description: Arbitrary event payload.
+            example:
+              event: "order.created"
+              data:
+                id: "123"
+                amount: 42
       responses:
         '202':
           description: Webhook accepted for delivery
+        '400':
+          description: Invalid signature or event type
+        '404':
+          description: Subscription not found
+
+  /scheduled:
+    get:
+      summary: List all scheduled webhooks
+      description: Retrieve all scheduled webhooks (admin/debug endpoint).
+      responses:
+        '200':
+          description: List of scheduled webhooks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ScheduledWebhook'
+    post:
+      summary: Schedule a new webhook
+      description: Schedule a webhook delivery for a future time and optional recurrence.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduledWebhookCreate'
+            example:
+              subscription_id: "sub-uuid"
+              payload: '{"event":"test"}'
+              scheduled_for: "2024-05-12T15:00:00Z"
+              recurrence: "daily"
+      responses:
+        '201':
+          description: Scheduled webhook created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduledWebhook'
+        '400':
+          description: Invalid input
+
+  /scheduled/{id}:
+    delete:
+      summary: Delete a scheduled webhook
+      description: Remove a scheduled webhook by its ID.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: Scheduled webhook ID
+      responses:
+        '204':
+          description: Scheduled webhook deleted
+        '404':
+          description: Scheduled webhook not found
+
+  /deliveries/{delivery_task_id}:
+    get:
+      summary: Get delivery task status and logs
+      description: Retrieve the status and all delivery attempts/logs for a delivery task.
+      parameters:
+        - in: path
+          name: delivery_task_id
+          required: true
+          schema:
+            type: string
+          description: Delivery task ID
+      responses:
+        '200':
+          description: Delivery task status and logs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  task:
+                    $ref: '#/components/schemas/DeliveryTask'
+                  logs:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DeliveryLog'
+        '404':
+          description: Delivery task not found
+
+  /subscriptions/{id}/deliveries:
+    get:
+      summary: List recent deliveries for a subscription
+      description: Get recent delivery logs for a subscription.
+      parameters:
+        - $ref: '#/components/parameters/SubscriptionId'
+      responses:
+        '200':
+          description: List of delivery logs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DeliveryLog'
+
+  /dlq/{subscription_id}:
+    get:
+      summary: List Dead Letter Queue (DLQ) tasks for a subscription
+      description: Retrieve failed delivery tasks for a subscription.
+      parameters:
+        - $ref: '#/components/parameters/SubscriptionId'
+      responses:
+        '200':
+          description: List of DLQ tasks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DLQTask'
+
   /healthz:
     get:
       summary: Health check
+      description: Returns 200 if the service is healthy.
       responses:
         '200':
           description: Service is healthy
 
 components:
+  parameters:
+    SubscriptionId:
+      in: path
+      name: id
+      required: true
+      schema:
+        type: string
+      description: Subscription ID (UUID)
+    SubscriptionIdPath:
+      in: path
+      name: subscription_id
+      required: true
+      schema:
+        type: string
+      description: Subscription ID (UUID)
+
   schemas:
+    Subscription:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique subscription identifier
+        target_url:
+          type: string
+          format: uri
+          description: The endpoint to which webhooks will be delivered
+        secret:
+          type: string
+          description: Secret used for HMAC signature verification
+        event_types:
+          type: string
+          description: Comma-separated list of event types this subscription receives
+        created_at:
+          type: string
+          format: date-time
+          description: Creation timestamp
+        updated_at:
+          type: string
+          format: date-time
+          description: Last update timestamp
+      example:
+        id: "c1f7c2e2-1234-4b6a-9c1e-abcdef123456"
+        target_url: "https://webhook.site/your-url"
+        secret: "mysecret"
+        event_types: "order.created,user.updated"
+        created_at: "2024-05-12T12:00:00Z"
+        updated_at: "2024-05-12T12:00:00Z"
+
     SubscriptionCreate:
       type: object
       properties:
         target_url:
           type: string
+          format: uri
+          description: The endpoint to which webhooks will be delivered
         secret:
           type: string
+          description: Secret used for HMAC signature verification
         event_types:
           type: string
+          description: Comma-separated list of event types this subscription receives
       required:
         - target_url
         - secret
         - event_types
+
     SubscriptionUpdate:
       type: object
       properties:
         target_url:
           type: string
+          format: uri
         secret:
           type: string
         event_types:
           type: string
+
+    DeliveryTask:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        subscription_id:
+          type: string
+          format: uuid
+        payload:
+          type: string
+        status:
+          type: string
+          description: Task status (pending, delivered, failed, etc.)
+        created_at:
+          type: string
+          format: date-time
+        last_attempt_at:
+          type: string
+          format: date-time
+        attempt_count:
+          type: integer
+      example:
+        id: "task-uuid"
+        subscription_id: "sub-uuid"
+        payload: '{"event":"order.created"}'
+        status: "pending"
+        created_at: "2024-05-12T12:00:00Z"
+        last_attempt_at: "2024-05-12T12:01:00Z"
+        attempt_count: 2
+
+    DeliveryLog:
+      type: object
+      properties:
+          id:
+            type: string
+            format: uuid
+          delivery_task_id:
+            type: string
+            format: uuid
+          subscription_id:
+            type: string
+            format: uuid
+          target_url:
+            type: string
+          timestamp:
+            type: string
+            format: date-time
+          attempt_number:
+            type: integer
+          outcome:
+            type: string
+            description: 'success or failed_attempt'
+          http_status:
+            type: integer
+          error_details:
+            type: string
+      example:
+        id: "log-uuid"
+        delivery_task_id: "task-uuid"
+        subscription_id: "sub-uuid"
+        target_url: "https://webhook.site/your-url"
+        timestamp: "2024-05-12T12:01:00Z"
+        attempt_number: 2
+        outcome: "failed_attempt"
+        http_status: 500
+        error_details: "Timeout"
+
+    ScheduledWebhook:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        subscription_id:
+          type: string
+          format: uuid
+        payload:
+          type: string
+        scheduled_for:
+          type: string
+          format: date-time
+        recurrence:
+          type: string
+          enum: [none, daily, weekly, monthly]
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      example:
+        id: "sched-uuid"
+        subscription_id: "sub-uuid"
+        payload: '{"event":"test"}'
+        scheduled_for: "2024-05-12T15:00:00Z"
+        recurrence: "daily"
+        status: "pending"
+        created_at: "2024-05-12T12:00:00Z"
+        updated_at: "2024-05-12T12:00:00Z"
+
+    ScheduledWebhookCreate:
+      type: object
+      properties:
+        subscription_id:
+          type: string
+          format: uuid
+        payload:
+          type: string
+        scheduled_for:
+          type: string
+          format: date-time
+        recurrence:
+          type: string
+          enum: [none, daily, weekly, monthly]
+      required:
+        - subscription_id
+        - payload
+        - scheduled_for
+
+    DLQTask:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        original_task_id:
+          type: string
+          format: uuid
+        subscription_id:
+          type: string
+          format: uuid
+        payload:
+          type: string
+        failed_at:
+          type: string
+          format: date-time
+        reason:
+          type: string
+        attempt_count:
+          type: integer
+        status:
+          type: string
+      example:
+        id: "dlq-uuid"
+        original_task_id: "task-uuid"
+        subscription_id: "sub-uuid"
+        payload: '{"event":"order.created"}'
+        failed_at: "2024-05-12T12:10:00Z"
+        reason: "Max retries exceeded"
+        attempt_count: 5
+        status: "pending"
