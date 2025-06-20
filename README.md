@@ -1,5 +1,7 @@
  # Webhook Delivery Service
+## Summary
 
+A production-ready webhook delivery service built with Go that provides reliable, scalable webhook processing and delivery. This service allows you to manage webhook subscriptions, ingest webhooks with HMAC verification, and deliver them asynchronously with retry logic and scheduling capabilities.
  ## Features
  - Subscription CRUD (API & UI) with secret and event type filtering.
  - Webhook ingestion endpoint with HMAC signature verification.
