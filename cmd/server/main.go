@@ -7,13 +7,13 @@ import (
 	"os"
 	"time"
 
-	"golang.org/x/time/rate"
-
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/api"
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/cache"
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/db"
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/delivery"
+	"github.com/KrishKoria/Webhook-Delivery-Service/sql/database"
 	"github.com/gin-gonic/gin"
+	"golang.org/x/time/rate"
 )
 
 
