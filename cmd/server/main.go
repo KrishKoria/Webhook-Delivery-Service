@@ -7,13 +7,27 @@ import (
 	"os"
 	"time"
 
+	"golang.org/x/time/rate"
+
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/api"
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/cache"
-	"github.com/KrishKoria/Webhook-Delivery-Service/internal/database"
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/db"
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/delivery"
 	"github.com/gin-gonic/gin"
 )
+
+
+func rateLimitMiddleware() gin.HandlerFunc {
+    limiter := rate.NewLimiter(rate.Every(time.Second), 10)
+    return func(c *gin.Context) {
+        if !limiter.Allow() {
+            c.JSON(429, gin.H{"error": "rate limit exceeded"})
+            c.Abort()
+            return
+        }
+        c.Next()
+    }
+}
 
 func main() {
     r := gin.Default()
@@ -22,6 +36,7 @@ func main() {
     }
     r.LoadHTMLGlob("web/templates/*.html")
     r.Static("/static", "./web/static")
+    r.Use(rateLimitMiddleware())
     queries := database.New(db.DB)
     
     r.GET("/healthz", func(c *gin.Context) {

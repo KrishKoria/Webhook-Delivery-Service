@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/KrishKoria/Webhook-Delivery-Service/internal/database"
+	"github.com/KrishKoria/Webhook-Delivery-Service/sql/database"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )

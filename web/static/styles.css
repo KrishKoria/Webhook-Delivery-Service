@@ -205,3 +205,23 @@ td form button {
 }
 
 .back-link { display: block; text-align: center; margin-bottom: 1em; }
+
+.error-banner {
+    background: #fee;
+    border: 1px solid #fcc;
+    color: #c00;
+    padding: 12px;
+    border-radius: 4px;
+    margin: 16px auto;
+    width: 95%;
+}
+
+.success-banner {
+    background: #efe;
+    border: 1px solid #cfc;
+    color: #060;
+    padding: 12px;
+    border-radius: 4px;
+    margin: 16px auto;
+    width: 95%;
+}

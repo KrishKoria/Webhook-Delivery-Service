@@ -7,7 +7,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/KrishKoria/Webhook-Delivery-Service/internal/database"
+	"github.com/KrishKoria/Webhook-Delivery-Service/sql/database"
 	"github.com/redis/go-redis/v9"
 )
 

@@ -5,7 +5,7 @@ services:
     ports:
       - "8080:8080"
     env_file:
-      - .env # .env can override REDIS_URL if you want to use an external Redis
+      - .env
     environment:
       - REDIS_URL=redis://redis:6379/0
     depends_on:

@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/KrishKoria/Webhook-Delivery-Service/internal/database"
+	"github.com/KrishKoria/Webhook-Delivery-Service/sql/database"
 )
 
 type CleanupWorker struct {
