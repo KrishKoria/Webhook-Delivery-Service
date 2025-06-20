@@ -1,21 +1,84 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Send Test Webhook</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Send Test Webhook - Webhook Service</title>
     <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-    <h1>Send Test Webhook for Subscription {{.SubscriptionID}}</h1>
-    <a href="/ui/subscriptions">Back to Subscriptions</a>
-    
-    <form method="POST" action="/ui/subscriptions/{{.SubscriptionID}}/send" id="send-webhook-form">
-        <label>Event Type:<br>
-            <input type="text" name="event_type" value="order.created">
-        </label><br>
-        <label>Payload (JSON):<br>
-            <textarea name="payload" rows="4" cols="60">{ "event": "test" }</textarea>
-        </label><br>
-        <button type="submit">Send Webhook</button>
-    </form>
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <h1>🔗 Webhook Service</h1>
+            </div>
+            <div class="nav-links">
+                <a href="/ui/subscriptions" class="nav-link">Subscriptions</a>
+                <a href="/ui/subscriptions/new" class="nav-link">New Subscription</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="page-header">
+            <div class="header-content">
+                <h2>🧪 Send Test Webhook</h2>
+                <p>Test webhook delivery for subscription: <span class="subscription-id">{{.SubscriptionID}}</span></p>
+            </div>
+            <a href="/ui/subscriptions" class="btn btn-secondary">← Back to Subscriptions</a>
+        </div>
+
+        <div class="form-card">
+            <div class="card-header">
+                <h3>Configure Test Webhook</h3>
+                <p class="card-subtitle">Send a test webhook to verify your endpoint is working correctly</p>
+            </div>
+            
+            <form method="POST" action="/ui/subscriptions/{{.SubscriptionID}}/send" id="send-webhook-form" class="modern-form">
+                <div class="form-group">
+                    <label for="event_type">🏷️ Event Type</label>
+                    <input type="text" 
+                           id="event_type" 
+                           name="event_type" 
+                           value="order.created"
+                           placeholder="order.created, user.updated, payment.completed"
+                           required>
+                    <small class="form-help">The type of event this webhook represents</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="payload">📄 Payload (JSON)</label>
+                    <textarea id="payload" 
+                              name="payload" 
+                              rows="10" 
+                              placeholder='{"event": "test", "data": {"id": "123", "status": "active"}}'
+                                                            required>{ "event": "test", "data": { "id": "test-123", "message": "This is a test webhook" } }</textarea>
+                    <small class="form-help">JSON payload that will be sent to your webhook endpoint</small>
+                </div>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">🚀 Send Test Webhook</button>
+                    <button type="button" class="btn btn-secondary" onclick="formatJSON()">🎨 Format JSON</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function formatJSON() {
+            const textarea = document.getElementById('payload');
+            try {
+                const parsed = JSON.parse(textarea.value);
+                textarea.value = JSON.stringify(parsed, null, 2);
+            } catch (e) {
+                alert('Invalid JSON format. Please check your syntax.');
+            }
+        }
+
+        // Auto-format JSON on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            formatJSON();
+        });
+    </script>
 </body>
 </html>

@@ -1,37 +1,94 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Schedule New Webhook</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Schedule New Webhook - Webhook Service</title>
     <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-    <h1>Schedule New Webhook for Subscription {{ .SubscriptionID }}</h1>
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <h1>🔗 Webhook Service</h1>
+            </div>
+            <div class="nav-links">
+                <a href="/ui/subscriptions" class="nav-link">Subscriptions</a>
+                <a href="/ui/subscriptions/new" class="nav-link">New Subscription</a>
+            </div>
+        </div>
+    </nav>
 
-    <form method="POST" action="/scheduled" id="schedule-form">
-        <input type="hidden" name="subscription_id" value="{{ .SubscriptionID }}">
+    <div class="container">
+        <div class="page-header">
+            <div class="header-content">
+                <h2>⏰ Schedule New Webhook</h2>
+                <p>Create a scheduled webhook for subscription: <span class="subscription-id">{{.SubscriptionID}}</span></p>
+            </div>
+            <a href="/ui/subscriptions/{{.SubscriptionID}}/scheduled/list" class="btn btn-secondary">← Back to Scheduled List</a>
+        </div>
 
-        <label>
-            Payload (JSON):
-            <input type="text" name="payload" required placeholder='{"key": "value"}'>
-        </label>
-        <label>
-            Scheduled For:
-            <input type="datetime-local" name="scheduled_for_local" required>
-        </label>
-        <input type="hidden" name="scheduled_for" id="scheduled_for_utc">
-        <label>
-            Recurrence:
-            <select name="recurrence">
-                <option value="none">None</option>
-                <option value="daily">Daily</option>
-                <option value="weekly">Weekly</option>
-                <option value="monthly">Monthly</option>
-            </select>
-        </label>
-        <button type="submit">Schedule Webhook</button>
-        <a href="/ui/subscriptions/{{ .SubscriptionID }}/scheduled/list" style="margin-left: 10px;">Cancel</a>
-    </form>
+        <div class="form-card">
+            <div class="card-header">
+                <h3>Configure Scheduled Webhook</h3>
+                <p class="card-subtitle">Set up a one-time or recurring webhook delivery</p>
+            </div>
+            
+            <form method="POST" action="/scheduled" id="schedule-form" class="modern-form">
+                <input type="hidden" name="subscription_id" value="{{.SubscriptionID}}">
+
+                <div class="form-group">
+                    <label for="payload">📄 Payload (JSON)</label>
+                    <textarea id="payload" 
+                              name="payload" 
+                              rows="8"
+                              placeholder='{"event": "scheduled_event", "data": {"id": "123", "status": "active"}}'
+                                                            required>{"event": "scheduled_webhook", "data": {"scheduled": true}}</textarea>
+                    <small class="form-help">JSON payload that will be sent when the webhook executes</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="scheduled_for_local">📅 Scheduled For</label>
+                    <input type="datetime-local" 
+                           id="scheduled_for_local" 
+                           name="scheduled_for_local" 
+                           required>
+                    <small class="form-help">When this webhook should be executed (your local timezone)</small>
+                </div>
+                
+                <input type="hidden" name="scheduled_for" id="scheduled_for_utc">
+
+                <div class="form-group">
+                    <label for="recurrence">🔄 Recurrence Pattern</label>
+                    <select id="recurrence" name="recurrence">
+                        <option value="none">📅 One-time only</option>
+                        <option value="daily">🌅 Daily</option>
+                        <option value="weekly">📅 Weekly</option>
+                        <option value="monthly">🗓️ Monthly</option>
+                    </select>
+                    <small class="form-help">How often this webhook should repeat</small>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">⏰ Schedule Webhook</button>
+                    <button type="button" class="btn btn-secondary" onclick="formatJSON()">🎨 Format JSON</button>
+                    <a href="/ui/subscriptions/{{.SubscriptionID}}/scheduled/list" class="btn btn-secondary">Cancel</a>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script>
+        function formatJSON() {
+            const textarea = document.getElementById('payload');
+            try {
+                const parsed = JSON.parse(textarea.value);
+                textarea.value = JSON.stringify(parsed, null, 2);
+            } catch (e) {
+                alert('Invalid JSON format. Please check your syntax.');
+            }
+        }
+
         document.getElementById('schedule-form').addEventListener('submit', function(e) {
             const localTimeInput = e.target.querySelector('input[name="scheduled_for_local"]');
             const utcTimeInput = document.getElementById('scheduled_for_utc');
@@ -40,6 +97,15 @@
                 const localDate = new Date(localTimeInput.value);
                 utcTimeInput.value = localDate.toISOString();
             }
+        });
+
+        // Set minimum datetime to current time and auto-format JSON
+        document.addEventListener('DOMContentLoaded', function() {
+            const now = new Date();
+            now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+            document.getElementById('scheduled_for_local').min = now.toISOString().slice(0, 16);
+            
+            formatJSON();
         });
     </script>
 </body>

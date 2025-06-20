@@ -1,40 +1,126 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Analytics for Subscription {{.SubscriptionID}}</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analytics - Webhook Service</title>
     <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-    <h1>Analytics for Subscription {{.SubscriptionID}}</h1>
-    <a href="/ui/subscriptions/{{.SubscriptionID}}/logs">Back to Logs</a>
-    <a href="/ui/subscriptions">Back to Subscriptions</a>
-    <h2>Summary</h2>
-    <ul>
-        <li><strong>Total Deliveries:</strong> {{.Total}}</li>
-        <li><strong>Successful:</strong> {{.Success}}</li>
-        <li><strong>Failed:</strong> {{.Failed}}</li>
-        <li><strong>Last Attempt:</strong> {{.LastAttempt}}</li>
-    </ul>
-    <h2>Recent Delivery Attempts</h2>
-    <table>
-        <tr>
-            <th>Task ID</th>
-            <th>Timestamp</th>
-            <th>Attempt</th>
-            <th>Outcome</th>
-            <th>HTTP Status</th>
-            <th>Error</th>
-        </tr>
-        {{range .Logs}}
-        <tr>
-            <td>{{.DeliveryTaskID}}</td>
-            <td>{{.Timestamp}}</td>
-            <td>{{.AttemptNumber}}</td>
-            <td>{{.Outcome}}</td>
-            <td>{{.HttpStatus.Int64}}</td>
-            <td>{{if .ErrorDetails.Valid}}{{.ErrorDetails.String}}{{else}}-{{end}}</td>
-        </tr>
-        {{end}}
-    </table>
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <h1>🔗 Webhook Service</h1>
+            </div>
+            <div class="nav-links">
+                <a href="/ui/subscriptions" class="nav-link">Subscriptions</a>
+                <a href="/ui/subscriptions/new" class="nav-link">New Subscription</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="page-header">
+            <div class="header-content">
+                <h2>📈 Analytics Dashboard</h2>
+                <p>Subscription: <span class="subscription-id">{{.SubscriptionID}}</span></p>
+            </div>
+            <div class="header-actions">
+                <a href="/ui/subscriptions/{{.SubscriptionID}}/logs" class="btn btn-secondary">📊 View Logs</a>
+                <a href="/ui/subscriptions" class="btn btn-secondary">← Back to Subscriptions</a>
+            </div>
+        </div>
+
+        <div class="analytics-grid">
+            <div class="stat-card">
+                <div class="stat-icon">📦</div>
+                <div class="stat-content">
+                    <h3>{{.Total}}</h3>
+                    <p>Total Deliveries</p>
+                </div>
+            </div>
+            
+            <div class="stat-card success">
+                <div class="stat-icon">✅</div>
+                <div class="stat-content">
+                    <h3>{{.Success}}</h3>
+                    <p>Successful</p>
+                </div>
+            </div>
+            
+            <div class="stat-card error">
+                <div class="stat-icon">❌</div>
+                <div class="stat-content">
+                    <h3>{{.Failed}}</h3>
+                    <p>Failed</p>
+                </div>
+            </div>
+            
+            <div class="stat-card">
+                <div class="stat-icon">🕒</div>
+                <div class="stat-content">
+                    <h3>{{if .LastAttempt}}{{.LastAttempt}}{{else}}Never{{end}}</h3>
+                    <p>Last Attempt</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h3>Recent Delivery Attempts</h3>
+            </div>
+            <div class="table-responsive">
+                <table class="modern-table">
+                    <thead>
+                        <tr>
+                            <th>Task ID</th>
+                            <th>Timestamp</th>
+                            <th>Attempt</th>
+                            <th>Outcome</th>
+                            <th>HTTP Status</th>
+                            <th>Error Details</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{range .Logs}}
+                        <tr>
+                            <td><code class="task-id">{{.DeliveryTaskID}}</code></td>
+                            <td><span class="timestamp">{{.Timestamp}}</span></td>
+                            <td><span class="attempt-number">{{.AttemptNumber}}</span></td>
+                            <td>
+                                <span class="status-badge status-{{.Outcome}}">
+                                    {{if eq .Outcome "success"}}✅{{else if eq .Outcome "failed_attempt"}}⚠️{{else}}❌{{end}}
+                                    {{.Outcome}}
+                                </span>
+                            </td>
+                            <td>
+                                {{if .HttpStatus.Valid}}
+                                    <span class="http-status {{if and (ge .HttpStatus.Int64 200) (lt .HttpStatus.Int64 300)}}status-success{{else}}status-error{{end}}">
+                                        {{.HttpStatus.Int64}}
+                                    </span>
+                                {{else}}
+                                    <span class="http-status">-</span>
+                                {{end}}
+                            </td>
+                            <td>
+                                {{if .ErrorDetails.Valid}}
+                                    <span class="error-details" title="{{.ErrorDetails.String}}">
+                                        {{if gt (len .ErrorDetails.String) 50}}
+                                            {{slice .ErrorDetails.String 0 50}}...
+                                        {{else}}
+                                            {{.ErrorDetails.String}}
+                                        {{end}}
+                                    </span>
+                                {{else}}
+                                    <span class="no-error">-</span>
+                                {{end}}
+                            </td>
+                        </tr>
+                        {{end}}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
 </body>
 </html>

@@ -1,51 +1,102 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Scheduled Webhooks for {{ .SubscriptionID }}</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scheduled Webhooks - Webhook Service</title>
     <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-    <h1>Scheduled Webhooks for Subscription {{ .SubscriptionID }}</h1>
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <h1>🔗 Webhook Service</h1>
+            </div>
+            <div class="nav-links">
+                <a href="/ui/subscriptions" class="nav-link">Subscriptions</a>
+                <a href="/ui/subscriptions/new" class="nav-link">New Subscription</a>
+            </div>
+        </div>
+    </nav>
 
-    <div class="back-link">
-        <a href="/ui/subscriptions">Back to Subscriptions List</a> |
-        <a href="/ui/subscriptions/{{ .SubscriptionID }}/scheduled/new">Schedule New for this Subscription</a> |
+    <div class="container">
+        <div class="page-header">
+            <div class="header-content">
+                <h2>⏰ Scheduled Webhooks</h2>
+                <p>Subscription: <span class="subscription-id">{{.SubscriptionID}}</span></p>
+            </div>
+            <div class="header-actions">
+                <a href="/ui/subscriptions/{{.SubscriptionID}}/scheduled/new" class="btn btn-primary">➕ Schedule New</a>
+                <a href="/ui/subscriptions" class="btn btn-secondary">← Back to Subscriptions</a>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h3>Scheduled Webhook Deliveries</h3>
+                <p class="card-subtitle">Manage your recurring and one-time webhook schedules</p>
+            </div>
+            <div class="table-responsive">
+                <table class="modern-table">
+                    <thead>
+                        <tr>
+                            <th>Schedule ID</th>
+                            <th>Scheduled For</th>
+                            <th>Payload Preview</th>
+                            <th>Recurrence</th>
+                            <th>Status</th>
+                            <th>Created At</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{range .ScheduledWebhooks}}
+                        <tr>
+                            <td><code class="task-id">{{.ID}}</code></td>
+                            <td>
+                                <span class="scheduled-time">{{.ScheduledFor.Format "2006-01-02 15:04"}}</span>
+                                <small class="timezone">MST</small>
+                            </td>
+                            <td>
+                                <div class="payload-preview" title="{{.Payload}}">
+                                    {{if gt (len .Payload) 100}}
+                                        <code>{{slice .Payload 0 100}}...</code>
+                                    {{else}}
+                                        <code>{{.Payload}}</code>
+                                    {{end}}
+                                </div>
+                            </td>
+                            <td>
+                                {{if .Recurrence.Valid}}
+                                    <span class="recurrence-badge recurring">🔄 {{.Recurrence.String}}</span>
+                                {{else}}
+                                    <span class="recurrence-badge one-time">📅 One-time</span>
+                                {{end}}
+                            </td>
+                            <td><span class="status-badge status-{{.Status}}">{{.Status}}</span></td>
+                            <td><span class="timestamp">{{.CreatedAt.Format "2006-01-02 15:04"}}</span></td>
+                            <td>
+                                <form method="POST" action="/scheduled/{{.ID}}?_method=DELETE" 
+                                      onsubmit="return confirm('Delete this scheduled webhook permanently?');" 
+                                      style="display:inline;">
+                                    <button type="submit" class="btn btn-sm btn-danger">🗑️ Delete</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {{else}}
+                        <tr>
+                            <td colspan="7" class="empty-state">
+                                <div class="empty-message">
+                                    📅 No scheduled webhooks found. <a href="/ui/subscriptions/{{$.SubscriptionID}}/scheduled/new">Create your first scheduled webhook</a>
+                                </div>
+                            </td>
+                        </tr>
+                        {{end}}
+                    </tbody>
+                </table>
+            </div>
+        </div>
     </div>
-
-    <table>
-        <thead>
-            <tr>
-                <th>ID</th>
-                <th>Scheduled For</th>
-                <th>Payload</th>
-                <th>Recurrence</th>
-                <th>Status</th>
-                <th>Created At</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-        {{ range .ScheduledWebhooks }}
-        <tr>
-            <td>{{ .ID }}</td>
-            <td>{{ .ScheduledFor.Format "2006-01-02 15:04 MST" }}</td>
-            <td style="max-width: 300px; overflow-x: auto;">{{ .Payload }}</td>
-            <td>{{ if .Recurrence.Valid }}{{ .Recurrence.String }}{{ else }}none{{ end }}</td>
-            <td>{{ .Status }}</td>
-            <td>{{ .CreatedAt.Format "2006-01-02 15:04 MST" }}</td>
-            <td>
-                <form method="POST" action="/scheduled/{{ .ID }}?_method=DELETE" onsubmit="return confirm('Delete this scheduled webhook?');" style="display:inline;">
-                    <button type="submit" class="delete-btn" style="color: #c00; background: none; border: none; padding: 0; cursor: pointer; text-decoration: underline;">Delete</button>
-                </form>
-            </td>
-        </tr>
-        {{ else }}
-        <tr>
-            <td colspan="7">No scheduled webhooks found for this subscription.</td>
-        </tr>
-        {{ end }}
-        </tbody>
-    </table>
 
     <script>
         document.querySelectorAll('form[action*="_method=DELETE"]').forEach(form => {

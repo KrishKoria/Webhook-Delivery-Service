@@ -1,18 +1,72 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Edit Subscription</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edit Subscription - Webhook Service</title>
     <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-    <h1>Edit Subscription</h1>
-    <form method="POST" action="/ui/subscriptions/{{.Subscription.ID}}/edit">
-        <label>Target URL: <input type="text" name="target_url" value="{{.Subscription.TargetUrl}}" required></label><br><br>
-        <label>Secret (optional): <input type="text" name="secret" value="{{if .Subscription.Secret.Valid}}{{.Subscription.Secret.String}}{{end}}"></label><br><br>
-        <label>Event Types (comma-separated): <input type="text" name="event_types" value="{{if .Subscription.EventTypes.Valid}}{{.Subscription.EventTypes.String}}{{end}}"></label><br><br>
-        <button type="submit">Update</button>
-    </form>
-    <br>
-    <a href="/ui/subscriptions">Back to Subscriptions</a>
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <h1>🔗 Webhook Service</h1>
+            </div>
+            <div class="nav-links">
+                <a href="/ui/subscriptions" class="nav-link">Subscriptions</a>
+                <a href="/ui/subscriptions/new" class="nav-link">New Subscription</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="page-header">
+            <div class="header-content">
+                <h2>✏️ Edit Subscription</h2>
+                <p>Update your webhook subscription settings</p>
+            </div>
+            <a href="/ui/subscriptions" class="btn btn-secondary">← Back to Subscriptions</a>
+        </div>
+
+        <div class="form-card">
+            <form method="POST" action="/ui/subscriptions/{{.Subscription.ID}}/edit" class="modern-form">
+                <div class="form-group">
+                    <label for="target_url">🎯 Target URL</label>
+                    <input type="url" 
+                           id="target_url" 
+                           name="target_url" 
+                           value="{{.Subscription.TargetUrl}}" 
+                           placeholder="https://your-endpoint.com/webhooks"
+                           required>
+                    <small class="form-help">The URL where webhooks will be delivered</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="secret">🔐 Secret (Optional)</label>
+                    <input type="text" 
+                           id="secret" 
+                           name="secret" 
+                           value="{{if .Subscription.Secret.Valid}}{{.Subscription.Secret.String}}{{end}}"
+                           placeholder="your-webhook-secret">
+                    <small class="form-help">Used for HMAC signature verification</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="event_types">🏷️ Event Types</label>
+                    <input type="text" 
+                           id="event_types" 
+                           name="event_types" 
+                           value="{{if .Subscription.EventTypes.Valid}}{{.Subscription.EventTypes.String}}{{end}}"
+                           placeholder="user.created, order.updated, payment.completed">
+                    <small class="form-help">Comma-separated list of event types to subscribe to</small>
+                </div>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">💾 Update Subscription</button>
+                    <a href="/ui/subscriptions" class="btn btn-secondary">Cancel</a>
+                </div>
+            </form>
+        </div>
+    </div>
 </body>
 </html>

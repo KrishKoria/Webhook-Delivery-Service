@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /go/bin/goose /usr/local/bin/goose
 COPY --from=builder /app/webhook-delivery-service .
 COPY web web
-COPY internal/sql/schema migrations
+COPY sql/schema migrations
 COPY docker-entrypoint.sh .
 
 RUN chmod +x ./docker-entrypoint.sh
