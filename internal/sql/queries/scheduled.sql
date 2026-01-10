@@ -5,6 +5,10 @@ INSERT INTO scheduled_webhooks (
     ?, ?, ?, ?, ?, 'pending'
 );
 
+-- name: GetScheduledWebhook :one
+SELECT * FROM scheduled_webhooks
+WHERE id = ?;
+
 -- name: ListScheduledWebhooks :many
 SELECT * FROM scheduled_webhooks
 WHERE subscription_id = ?
@@ -28,3 +32,12 @@ SELECT id, subscription_id, payload, scheduled_for, recurrence, status, created_
 FROM scheduled_webhooks
 ORDER BY scheduled_for ASC
 LIMIT ? OFFSET ?;
+
+-- name: CountScheduledWebhooksByStatus :one
+SELECT 
+    COUNT(*) as total,
+    SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
+    SUM(CASE WHEN status = 'delivered' THEN 1 ELSE 0 END) as delivered,
+    SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
+    SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled
+FROM scheduled_webhooks;

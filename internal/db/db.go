@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/joho/godotenv"
-	_ "github.com/tursodatabase/go-libsql"
+	_ "github.com/tursodatabase/turso-go"
 )
 
 var DB *sql.DB
@@ -45,7 +45,7 @@ func Init() error {
         }
         log.Printf("Application DB: Using remote Turso database with token.")
     }
-    db, err := sql.Open("libsql", connStr)
+    db, err := sql.Open("turso", connStr)
     if err != nil {
         return fmt.Errorf("failed to open db with connection string '%s': %w", connStr, err)
     }

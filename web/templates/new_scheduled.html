@@ -1,46 +1,124 @@
 <!DOCTYPE html>
 <html>
-<head>
-    <title>Schedule New Webhook</title>
-    <link rel="stylesheet" href="/static/styles.css">
-</head>
-<body>
-    <h1>Schedule New Webhook for Subscription {{ .SubscriptionID }}</h1>
+  <head>
+    <title>Schedule Webhook - Webhook Service</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <nav class="navbar">
+      <a href="/ui/dashboard" class="navbar-brand">Webhook Service</a>
+      <ul class="navbar-nav">
+        <li><a href="/ui/dashboard">Dashboard</a></li>
+        <li><a href="/ui/subscriptions">Subscriptions</a></li>
+        <li><a href="/ui/backlog">Backlog</a></li>
+        <li><a href="/ui/dlq">Dead Letter Queue</a></li>
+        <li><a href="/ui/scheduled" class="active">Scheduled</a></li>
+      </ul>
+    </nav>
 
-    <form method="POST" action="/scheduled" id="schedule-form">
-        <input type="hidden" name="subscription_id" value="{{ .SubscriptionID }}">
+    <div class="container">
+      <div class="page-header">
+        <h1>Schedule New Webhook</h1>
+        <p class="subtitle">Subscription: <code>{{ .SubscriptionID }}</code></p>
+      </div>
 
-        <label>
-            Payload (JSON):
-            <input type="text" name="payload" required placeholder='{"key": "value"}'>
-        </label>
-        <label>
-            Scheduled For:
-            <input type="datetime-local" name="scheduled_for_local" required>
-        </label>
-        <input type="hidden" name="scheduled_for" id="scheduled_for_utc">
-        <label>
-            Recurrence:
-            <select name="recurrence">
-                <option value="none">None</option>
+      <div class="action-bar">
+        <a
+          href="/ui/subscriptions/{{ .SubscriptionID }}/scheduled/list"
+          class="btn btn-secondary"
+          >← Back to Scheduled List</a
+        >
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h3>Webhook Details</h3>
+        </div>
+        <div class="card-body">
+          <form
+            method="POST"
+            action="/scheduled"
+            id="schedule-form"
+            class="form"
+          >
+            <input
+              type="hidden"
+              name="subscription_id"
+              value="{{ .SubscriptionID }}"
+            />
+            <input type="hidden" name="scheduled_for" id="scheduled_for_utc" />
+
+            <div class="form-group">
+              <label for="payload"
+                >Payload (JSON) <span class="required">*</span></label
+              >
+              <textarea
+                id="payload"
+                name="payload"
+                required
+                class="form-control"
+                rows="4"
+                placeholder='{ "key": "value" }'
+              ></textarea>
+              <small class="form-help"
+                >The JSON payload to send when the webhook fires</small
+              >
+            </div>
+
+            <div class="form-group">
+              <label for="scheduled_for_local"
+                >Scheduled For <span class="required">*</span></label
+              >
+              <input
+                type="datetime-local"
+                id="scheduled_for_local"
+                name="scheduled_for_local"
+                required
+                class="form-control"
+              />
+              <small class="form-help"
+                >When the webhook should be delivered (your local time)</small
+              >
+            </div>
+
+            <div class="form-group">
+              <label for="recurrence">Recurrence</label>
+              <select id="recurrence" name="recurrence" class="form-control">
+                <option value="none">None (one-time delivery)</option>
                 <option value="daily">Daily</option>
                 <option value="weekly">Weekly</option>
                 <option value="monthly">Monthly</option>
-            </select>
-        </label>
-        <button type="submit">Schedule Webhook</button>
-        <a href="/ui/subscriptions/{{ .SubscriptionID }}/scheduled/list" style="margin-left: 10px;">Cancel</a>
-    </form>
+              </select>
+              <small class="form-help">Optional recurring schedule</small>
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary">
+                <span>📅</span> Schedule Webhook
+              </button>
+              <a
+                href="/ui/subscriptions/{{ .SubscriptionID }}/scheduled/list"
+                class="btn btn-secondary"
+                >Cancel</a
+              >
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
     <script>
-        document.getElementById('schedule-form').addEventListener('submit', function(e) {
-            const localTimeInput = e.target.querySelector('input[name="scheduled_for_local"]');
-            const utcTimeInput = document.getElementById('scheduled_for_utc');
-    
-            if (localTimeInput.value) {
-                const localDate = new Date(localTimeInput.value);
-                utcTimeInput.value = localDate.toISOString();
-            }
+      document
+        .getElementById("schedule-form")
+        .addEventListener("submit", function (e) {
+          const localTimeInput = document.getElementById("scheduled_for_local");
+          const utcTimeInput = document.getElementById("scheduled_for_utc");
+
+          if (localTimeInput.value) {
+            const localDate = new Date(localTimeInput.value);
+            utcTimeInput.value = localDate.toISOString();
+          }
         });
     </script>
-</body>
+  </body>
 </html>

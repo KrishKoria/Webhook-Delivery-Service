@@ -1,45 +1,42 @@
 #!/bin/bash
-set -e
+# Cloud Run optimized entrypoint - starts server immediately for health checks
 
-# Start with the base URL
-DB_CONN_STR="$TURSO_DATABASE_URL"
+echo "=== Container Starting ==="
+echo "PORT=${PORT:-8080}"
+echo "TURSO_DATABASE_URL is $([ -n "$TURSO_DATABASE_URL" ] && echo "SET" || echo "NOT SET")"
+echo "TURSO_AUTH_TOKEN is $([ -n "$TURSO_AUTH_TOKEN" ] && echo "SET" || echo "NOT SET")"
 
-# Handle the authentication for different URL types
-if [[ -n "$TURSO_AUTH_TOKEN" ]]; then
-  if [[ "$TURSO_DATABASE_URL" == libsql://* ]]; then
-    # For Turso's libsql protocol, we need special handling
-    # Extract just the hostname part from the URL (remove libsql://)
-    HOSTNAME=${TURSO_DATABASE_URL#libsql://}
+# Skip migrations in Cloud Run - run them separately if needed
+# The app will fail fast if DB connection is wrong anyway
+if [[ "$SKIP_MIGRATIONS" != "true" && -d "./migrations" && -n "$(ls -A ./migrations 2>/dev/null)" ]]; then
+    echo "Running migrations (set SKIP_MIGRATIONS=true to skip)..."
     
-    # Construct a properly formatted URL for goose turso driver
-    DB_CONN_STR="https://$HOSTNAME?authToken=$TURSO_AUTH_TOKEN"
-  elif [[ "$TURSO_DATABASE_URL" == file:* ]]; then
-    # For file-based URLs
-    if [[ "$DB_CONN_STR" == *"?"* ]]; then
-      DB_CONN_STR="$DB_CONN_STR&authToken=$TURSO_AUTH_TOKEN"
-    else
-      DB_CONN_STR="$DB_CONN_STR?authToken=$TURSO_AUTH_TOKEN"
+    # Build connection string for goose
+    DB_CONN_STR="$TURSO_DATABASE_URL"
+    if [[ -n "$TURSO_AUTH_TOKEN" ]]; then
+        if [[ "$TURSO_DATABASE_URL" == libsql://* ]]; then
+            # For remote Turso - use libsql:// format with authToken
+            if [[ "$DB_CONN_STR" == *"?"* ]]; then
+                DB_CONN_STR="$DB_CONN_STR&authToken=$TURSO_AUTH_TOKEN"
+            else
+                DB_CONN_STR="$DB_CONN_STR?authToken=$TURSO_AUTH_TOKEN"
+            fi
+        else
+            # For other URL types (https://, file:, etc.)
+            if [[ "$DB_CONN_STR" == *"?"* ]]; then
+                DB_CONN_STR="$DB_CONN_STR&authToken=$TURSO_AUTH_TOKEN"
+            else
+                DB_CONN_STR="$DB_CONN_STR?authToken=$TURSO_AUTH_TOKEN"
+            fi
+        fi
     fi
-  else
-    # For other URL types
-    if [[ "$DB_CONN_STR" == *"?"* ]]; then
-      DB_CONN_STR="$DB_CONN_STR&authToken=$TURSO_AUTH_TOKEN"
-    else
-      DB_CONN_STR="$DB_CONN_STR?authToken=$TURSO_AUTH_TOKEN"
-    fi
-  fi
+    
+    # Run goose with timeout to prevent hanging
+    timeout 30s goose -dir ./migrations turso "$DB_CONN_STR" up 2>&1 || echo "Migration warning: $?"
+else
+    echo "Skipping migrations (SKIP_MIGRATIONS=$SKIP_MIGRATIONS)"
 fi
 
-mkdir -p ./migrations
-
-# For security, mask the token in logs
-MASKED_CONN_STR=$(echo "$DB_CONN_STR" | sed 's/authToken=.\{10\}.*$/authToken=***MASKED***/g')
-echo "Attempting to run migrations with connection string: $MASKED_CONN_STR"
-
-# Run goose migrations
-goose -dir ./migrations turso "$DB_CONN_STR" up
-echo "Migrations completed."
-
-# Start the app
-echo "Starting webhook-delivery-service..."
-./webhook-delivery-service
+# Start the app immediately - this binds to PORT for Cloud Run health check
+echo "=== Starting Server on port ${PORT:-8080} ==="
+exec ./webhook-delivery-service

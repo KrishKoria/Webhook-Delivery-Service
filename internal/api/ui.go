@@ -1,11 +1,7 @@
 package api
 
 import (
-	"bytes"
-	"crypto/hmac"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"net/http"
 
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/cache"
@@ -33,6 +29,23 @@ func RegisterUIRoutes(r *gin.Engine, h *UIHandler) {
     r.POST("/ui/subscriptions/:id/delete", h.DeleteSubscription)
     r.GET("/ui/subscriptions/:id/scheduled/new", h.NewScheduledPage) 
     r.GET("/ui/subscriptions/:id/scheduled/list", h.ScheduledListPage) 
+}
+
+// RegisterUIRoutesGroup registers UI routes on a RouterGroup (for middleware).
+func RegisterUIRoutesGroup(rg *gin.RouterGroup, h *UIHandler) {
+    rg.GET("/ui/subscriptions", h.ListSubscriptionsPage)
+    rg.GET("/ui/subscriptions/new", h.NewSubscriptionForm)
+    rg.POST("/ui/subscriptions/new", h.CreateSubscriptionForm)
+    rg.GET("/ui/subscriptions/:id/logs", h.SubscriptionLogsPage)
+    rg.POST("/ui/subscriptions/:id/send", h.SendTestWebhook)
+    rg.GET("/ui/subscriptions/:id/test", h.TestWebhookForm)
+    rg.GET("/ui/subscriptions/:id/analytics", h.SubscriptionAnalyticsPage)
+    rg.GET("/api/subscriptions/:id/logs", h.GetLogsJSON)
+    rg.GET("/ui/subscriptions/:id/edit", h.EditSubscriptionForm)
+    rg.POST("/ui/subscriptions/:id/edit", h.UpdateSubscriptionForm)
+    rg.POST("/ui/subscriptions/:id/delete", h.DeleteSubscription)
+    rg.GET("/ui/subscriptions/:id/scheduled/new", h.NewScheduledPage)
+    rg.GET("/ui/subscriptions/:id/scheduled/list", h.ScheduledListPage)
 }
 
 // ListSubscriptionsPage handles GET /ui/subscriptions
@@ -130,33 +143,31 @@ func (h *UIHandler) SubscriptionLogsPage(c *gin.Context) {
 func (h *UIHandler) SendTestWebhook(c *gin.Context) {
     id := c.Param("id")
     payload := c.PostForm("payload")
-    eventType := c.PostForm("event_type")
+    // eventType := c.PostForm("event_type")  // Available if needed for logging
 
-    url := "http://localhost:8080/ingest/" + id
+    // Set defaults if not provided
+    if payload == "" {
+        payload = `{"event":"test","source":"admin_ui"}`
+    }
 
-    req, err := http.NewRequest("POST", url, bytes.NewBuffer([]byte(payload)))
+    // Check subscription exists
+    _, err := h.Queries.GetSubscription(c, id)
     if err != nil {
-        c.String(http.StatusInternalServerError, "Error: %v", err)
+        c.String(http.StatusNotFound, "Subscription not found")
         return
     }
-    req.Header.Set("Content-Type", "application/json")
-    req.Header.Set("X-Event-Type", eventType)
 
-    sub, err := h.Queries.GetSubscription(c, id)
-    if err == nil && sub.Secret.Valid && sub.Secret.String != "" {
-        mac := hmac.New(sha256.New, []byte(sub.Secret.String))
-        mac.Write([]byte(payload))
-        signature := "sha256=" + hex.EncodeToString(mac.Sum(nil))
-        req.Header.Set("X-Hub-Signature-256", signature)
-    }
-
-    client := &http.Client{}
-    resp, err := client.Do(req)
+    // Create delivery task directly (bypasses signature verification for admin-initiated tests)
+    taskID := uuid.New().String()
+    err = h.Queries.CreateDeliveryTask(c, database.CreateDeliveryTaskParams{
+        ID:             taskID,
+        SubscriptionID: id,
+        Payload:        payload,
+    })
     if err != nil {
-        c.String(http.StatusInternalServerError, "Error: %v", err)
+        c.String(http.StatusInternalServerError, "Error creating delivery task: %v", err)
         return
     }
-    defer resp.Body.Close()
 
     c.Redirect(http.StatusSeeOther, "/ui/subscriptions/"+id+"/logs")
 }

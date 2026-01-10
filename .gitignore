@@ -1,2 +1,7 @@
 .env
 *.db
+.claude
+.github/
+_bmad 
+_bmad-output
+docs/

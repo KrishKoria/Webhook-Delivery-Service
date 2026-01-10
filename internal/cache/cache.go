@@ -64,3 +64,11 @@ func (c *RedisSubscriptionCache) Del(id string) {
     ctx := context.Background()
     c.client.Del(ctx, id)
 }
+
+// Ping checks the Redis connection health.
+func (c *RedisSubscriptionCache) Ping(ctx context.Context) error {
+    if c == nil || c.client == nil {
+        return fmt.Errorf("cache not initialized")
+    }
+    return c.client.Ping(ctx).Err()
+}

@@ -20,9 +20,10 @@ FROM debian:bookworm-slim
 
 WORKDIR /app
 
-# Install minimal runtime dependencies
+# Install minimal runtime dependencies (bash for entrypoint script)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
+    bash \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /go/bin/goose /usr/local/bin/goose
