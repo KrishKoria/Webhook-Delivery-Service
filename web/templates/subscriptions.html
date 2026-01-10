@@ -1,47 +1,94 @@
 <!DOCTYPE html>
 <html>
-<head>
+  <head>
     <title>Webhook Subscriptions</title>
-    <link rel="stylesheet" href="/static/styles.css">
-</head>
-<body>
-    <h1>Webhook Subscriptions</h1>
-    <a href="/ui/subscriptions/new">Create New Subscription</a>
-    <table border="1" cellpadding="5">
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <nav class="navbar">
+      <a href="/ui/dashboard" class="navbar-brand">Webhook Service</a>
+      <ul class="navbar-nav">
+        <li><a href="/ui/dashboard">Dashboard</a></li>
+        <li><a href="/ui/subscriptions" class="active">Subscriptions</a></li>
+        <li><a href="/ui/backlog">Backlog</a></li>
+        <li><a href="/ui/dlq">Dead Letter Queue</a></li>
+        <li><a href="/ui/scheduled">Scheduled</a></li>
+      </ul>
+    </nav>
+
+    <div class="container">
+      <h1>Webhook Subscriptions</h1>
+      <p class="page-subtitle">Manage your webhook endpoints</p>
+
+      <div class="action-bar">
+        <div class="action-bar-left">
+          <span>{{ len .Subscriptions }} subscription(s)</span>
+        </div>
+        <div class="action-bar-right">
+          <a href="/ui/subscriptions/new" class="btn"
+            >Create New Subscription</a
+          >
+        </div>
+      </div>
+
+      <table>
         <tr>
-            <th>ID</th>
-            <th>Target URL</th>
-            <th>Secret</th>
-            <th>Created At</th>
-            <th>Event Types</th>
-            <th>Actions</th>
+          <th>ID</th>
+          <th>Target URL</th>
+          <th>Secret</th>
+          <th>Created At</th>
+          <th>Event Types</th>
+          <th>Actions</th>
         </tr>
         {{range .Subscriptions}}
         <tr>
-            <td>{{.ID}}</td>
-            <td>{{.TargetUrl}}</td>
-            <td>{{if .Secret.Valid}}{{.Secret.String}}{{else}}-{{end}}</td>
-            <td>{{.CreatedAt}}</td>
-            <td>{{if .EventTypes.Valid}}{{.EventTypes.String}}{{else}}-{{end}}</td>
-            <td>
-                <div class="dropdown">
-                    <button class="dropdown-btn">Actions ▾</button>
-                    <div class="dropdown-content">
-                        <a href="/ui/subscriptions/{{.ID}}/test">Send Test</a> 
-                        <a href="/ui/subscriptions/{{.ID}}/logs">View Logs</a>
-                        <a href="/ui/subscriptions/{{.ID}}/analytics">Analytics</a>
-                        <a href="/ui/subscriptions/{{.ID}}/edit">Edit</a>
-                        <a href="/ui/subscriptions/{{.ID}}/dlq">Dead Letter Queue</a>
-                        <a href="/ui/subscriptions/{{.ID}}/scheduled/list">View Scheduled List</a>
-                        <a href="/ui/subscriptions/{{.ID}}/scheduled/new">Schedule New</a>
-                        <form method="POST" action="/ui/subscriptions/{{.ID}}/delete" onsubmit="return confirm('Delete this subscription?');">
-                            <button type="submit">Delete</button>
-                        </form>
-                    </div>
-                </div>
-            </td>
+          <td><code>{{.ID}}</code></td>
+          <td>{{.TargetUrl}}</td>
+          <td>
+            {{if .Secret.Valid}}<span
+              class="secret-badge"
+              title="Secret configured"
+              >●●●●●●●●</span
+            >{{else}}<span class="no-secret">Not set</span>{{end}}
+          </td>
+          <td>{{.CreatedAt.Format "2006-01-02 15:04"}}</td>
+          <td>
+            {{if .EventTypes.Valid}}{{.EventTypes.String}}{{else}}-{{end}}
+          </td>
+          <td>
+            <div class="dropdown">
+              <button class="dropdown-btn">Actions ▾</button>
+              <div class="dropdown-content">
+                <a href="/ui/subscriptions/{{.ID}}/test">Send Test</a>
+                <a href="/ui/subscriptions/{{.ID}}/logs">View Logs</a>
+                <a href="/ui/subscriptions/{{.ID}}/analytics">Analytics</a>
+                <a href="/ui/subscriptions/{{.ID}}/edit">Edit</a>
+                <a href="/ui/subscriptions/{{.ID}}/dlq">Dead Letter Queue</a>
+                <a href="/ui/subscriptions/{{.ID}}/scheduled/list"
+                  >View Scheduled List</a
+                >
+                <a href="/ui/subscriptions/{{.ID}}/scheduled/new"
+                  >Schedule New</a
+                >
+                <form
+                  method="POST"
+                  action="/ui/subscriptions/{{.ID}}/delete"
+                  onsubmit="return confirm('Delete this subscription?');"
+                >
+                  <button type="submit">Delete</button>
+                </form>
+              </div>
+            </div>
+          </td>
+        </tr>
+        {{else}}
+        <tr>
+          <td colspan="6" style="text-align: center; color: #64748b">
+            No subscriptions yet. Create one to get started.
+          </td>
         </tr>
         {{end}}
-    </table>
-</body>
+      </table>
+    </div>
+  </body>
 </html>

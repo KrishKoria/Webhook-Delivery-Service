@@ -1,43 +1,83 @@
 <!DOCTYPE html>
 <html>
-<head>
+  <head>
     <title>Dead Letter Queue</title>
-    <link rel="stylesheet" href="/static/styles.css">
-</head>
-<body>
-<h2>Dead Letter Queue for Subscription {{ .SubscriptionID }}</h2>
-<table border="1" cellpadding="6" cellspacing="0">
-  <tr>
-    <th>ID</th>
-    <th>Reason</th>
-    <th>Attempts</th>
-    <th>Failed At</th>
-    <th>Status</th>
-    <th>Actions</th>
-  </tr>
-  {{ range .Tasks }}
-  <tr>
-    <td>{{ .ID }}</td>
-    <td>{{ .Reason }}</td>
-    <td>{{ .AttemptCount }}</td>
-    <td>{{ .FailedAt }}</td>
-    <td>{{ .Status }}</td>
-    <td>
-      <form method="POST" action="/ui/dlq/{{ .ID }}/retry" style="display:inline">
-        <button type="submit">Retry</button>
-      </form>
-      <form method="POST" action="/ui/dlq/{{ .ID }}/delete" style="display:inline" onsubmit="return confirm('Delete this DLQ task?')">
-        <button type="submit">Delete</button>
-      </form>
-    </td>
-  </tr>
-  {{ else }}
-  <tr>
-    <td colspan="6">No dead letter tasks found.</td>
-  </tr>
-  {{ end }}
-</table>
-<br>
-<a href="/ui/subscriptions/{{ .SubscriptionID }}/logs">Back to Logs</a>
-</body>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <nav class="navbar">
+      <a href="/ui/dashboard" class="navbar-brand">Webhook Service</a>
+      <ul class="navbar-nav">
+        <li><a href="/ui/dashboard">Dashboard</a></li>
+        <li><a href="/ui/subscriptions">Subscriptions</a></li>
+        <li><a href="/ui/backlog">Backlog</a></li>
+        <li><a href="/ui/dlq" class="active">Dead Letter Queue</a></li>
+        <li><a href="/ui/scheduled">Scheduled</a></li>
+      </ul>
+    </nav>
+
+    <div class="container">
+      <h2>Dead Letter Queue for Subscription {{ .SubscriptionID }}</h2>
+      <p class="page-subtitle">Failed deliveries for this subscription</p>
+
+      <div class="back-link">
+        <a href="/ui/subscriptions/{{ .SubscriptionID }}/logs">Back to Logs</a>
+        | <a href="/ui/subscriptions">Back to Subscriptions</a> |
+        <a href="/ui/dlq">View All DLQ</a>
+      </div>
+
+      <table>
+        <tr>
+          <th>ID</th>
+          <th>Reason</th>
+          <th>Attempts</th>
+          <th>Failed At</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+        {{ range .Tasks }}
+        <tr>
+          <td><code>{{ .ID }}</code></td>
+          <td
+            style="max-width: 200px; overflow: hidden; text-overflow: ellipsis"
+          >
+            {{ .Reason }}
+          </td>
+          <td>{{ .AttemptCount }}</td>
+          <td>{{ .FailedAt.Format "2006-01-02 15:04" }}</td>
+          <td><span class="badge badge-{{ .Status }}">{{ .Status }}</span></td>
+          <td>
+            {{ if eq .Status "dead" }}
+            <form
+              method="POST"
+              action="/ui/dlq/{{ .ID }}/retry"
+              style="display: inline"
+            >
+              <button type="submit" class="btn btn-sm btn-success">
+                Retry
+              </button>
+            </form>
+            {{ end }}
+            <form
+              method="POST"
+              action="/ui/dlq/{{ .ID }}/delete"
+              style="display: inline"
+              onsubmit="return confirm('Delete this DLQ task?')"
+            >
+              <button type="submit" class="btn btn-sm btn-danger">
+                Delete
+              </button>
+            </form>
+          </td>
+        </tr>
+        {{ else }}
+        <tr>
+          <td colspan="6" style="text-align: center; color: #64748b">
+            No dead letter tasks found.
+          </td>
+        </tr>
+        {{ end }}
+      </table>
+    </div>
+  </body>
 </html>

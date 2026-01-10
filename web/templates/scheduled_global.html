@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Scheduled Webhooks - Webhook Delivery Service</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <nav class="navbar">
+      <a href="/ui/dashboard" class="navbar-brand">Webhook Service</a>
+      <ul class="navbar-nav">
+        <li><a href="/ui/dashboard">Dashboard</a></li>
+        <li><a href="/ui/subscriptions">Subscriptions</a></li>
+        <li><a href="/ui/backlog">Backlog</a></li>
+        <li><a href="/ui/dlq">Dead Letter Queue</a></li>
+        <li><a href="/ui/scheduled" class="active">Scheduled</a></li>
+      </ul>
+    </nav>
+
+    <div class="container">
+      <h1>Scheduled Webhooks</h1>
+      <p class="page-subtitle">
+        All scheduled webhook deliveries across subscriptions
+      </p>
+
+      <!-- Stats Cards -->
+      <div class="dashboard-grid">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Total Scheduled</span>
+            <div class="card-icon purple">T</div>
+          </div>
+          <div class="card-value">{{ .Stats.Total }}</div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Pending</span>
+            <div class="card-icon yellow">P</div>
+          </div>
+          <div class="card-value">{{ .Stats.Pending }}</div>
+          <div class="card-subtitle">Awaiting delivery</div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Delivered</span>
+            <div class="card-icon green">D</div>
+          </div>
+          <div class="card-value">{{ .Stats.Delivered }}</div>
+          <div class="card-subtitle">Successfully sent</div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Failed</span>
+            <div class="card-icon red">F</div>
+          </div>
+          <div class="card-value">{{ .Stats.Failed }}</div>
+          <div class="card-subtitle">Delivery failed</div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Cancelled</span>
+            <div class="card-icon blue">C</div>
+          </div>
+          <div class="card-value">{{ .Stats.Cancelled }}</div>
+          <div class="card-subtitle">Manually cancelled</div>
+        </div>
+      </div>
+
+      <!-- Filter Bar -->
+      <div class="action-bar">
+        <div class="action-bar-left">
+          <span>Filter by status:</span>
+          <select id="statusFilter" onchange="filterByStatus()">
+            <option value="">All</option>
+            <option value="pending">Pending</option>
+            <option value="delivered">Delivered</option>
+            <option value="failed">Failed</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Scheduled Webhooks Table -->
+      {{ if .ScheduledWebhooks }}
+      <table id="scheduledTable">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Subscription</th>
+            <th>Scheduled For</th>
+            <th>Recurrence</th>
+            <th>Status</th>
+            <th>Created</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{ range .ScheduledWebhooks }}
+          <tr data-status="{{ .Status }}">
+            <td><code>{{ .ID }}</code></td>
+            <td>
+              <a href="/ui/subscriptions/{{ .SubscriptionID }}/scheduled/list"
+                >{{ .SubscriptionID }}</a
+              >
+            </td>
+            <td>{{ .ScheduledFor.Format "2006-01-02 15:04 MST" }}</td>
+            <td>
+              {{ if .Recurrence.Valid }}{{ .Recurrence.String }}{{ else
+              }}One-time{{ end }}
+            </td>
+            <td>
+              <span class="badge badge-{{ .Status }}">{{ .Status }}</span>
+            </td>
+            <td>{{ .CreatedAt.Format "2006-01-02 15:04" }}</td>
+            <td>
+              {{ if eq .Status "pending" }}
+              <form
+                method="POST"
+                action="/ui/scheduled/{{ .ID }}/cancel"
+                style="display: inline"
+                onsubmit="return confirm('Cancel this scheduled webhook?');"
+              >
+                <button type="submit" class="btn btn-sm btn-warning">
+                  Cancel
+                </button>
+              </form>
+              {{ end }}
+              <form
+                method="POST"
+                action="/ui/scheduled/{{ .ID }}/delete"
+                style="display: inline"
+                onsubmit="return confirm('Delete this scheduled webhook?');"
+              >
+                <button type="submit" class="btn btn-sm btn-danger">
+                  Delete
+                </button>
+              </form>
+            </td>
+          </tr>
+          {{ end }}
+        </tbody>
+      </table>
+      {{ else }}
+      <p style="text-align: center; color: #64748b; margin-top: 40px">
+        No scheduled webhooks found.
+      </p>
+      {{ end }}
+    </div>
+
+    <script>
+      function filterByStatus() {
+        const filter = document.getElementById("statusFilter").value;
+        const rows = document.querySelectorAll("#scheduledTable tbody tr");
+
+        rows.forEach((row) => {
+          const status = row.getAttribute("data-status");
+          if (filter === "" || status === filter) {
+            row.style.display = "";
+          } else {
+            row.style.display = "none";
+          }
+        });
+      }
+    </script>
+  </body>
+</html>

@@ -1,0 +1,2 @@
+# Ignore Go HTML templates - Prettier breaks textarea tags
+web/templates/*.html

@@ -1,21 +1,56 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Send Test Webhook</title>
+    <title>Send Test Webhook - Webhook Service</title>
     <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-    <h1>Send Test Webhook for Subscription {{.SubscriptionID}}</h1>
-    <a href="/ui/subscriptions">Back to Subscriptions</a>
-    
-    <form method="POST" action="/ui/subscriptions/{{.SubscriptionID}}/send" id="send-webhook-form">
-        <label>Event Type:<br>
-            <input type="text" name="event_type" value="order.created">
-        </label><br>
-        <label>Payload (JSON):<br>
-            <textarea name="payload" rows="4" cols="60">{ "event": "test" }</textarea>
-        </label><br>
-        <button type="submit">Send Webhook</button>
-    </form>
+    <nav class="navbar">
+        <a href="/ui/dashboard" class="navbar-brand">Webhook Service</a>
+        <ul class="navbar-nav">
+            <li><a href="/ui/dashboard">Dashboard</a></li>
+            <li><a href="/ui/subscriptions" class="active">Subscriptions</a></li>
+            <li><a href="/ui/backlog">Backlog</a></li>
+            <li><a href="/ui/dlq">Dead Letter Queue</a></li>
+            <li><a href="/ui/scheduled">Scheduled</a></li>
+        </ul>
+    </nav>
+
+    <div class="container">
+        <div class="page-header">
+            <h1>Send Test Webhook</h1>
+            <p class="subtitle">Subscription: <code>{{.SubscriptionID}}</code></p>
+        </div>
+
+        <div class="action-bar">
+            <a href="/ui/subscriptions" class="btn btn-secondary">Back to Subscriptions</a>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h3>Webhook Details</h3>
+            </div>
+            <div class="card-body">
+                <form method="POST" action="/ui/subscriptions/{{.SubscriptionID}}/send" id="send-webhook-form" class="form">
+                    <div class="form-group">
+                        <label for="event_type">Event Type</label>
+                        <input type="text" id="event_type" name="event_type" value="order.created" class="form-control" placeholder="e.g., order.created, user.signup">
+                        <small class="form-help">The type of event being sent</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="payload">Payload (JSON)</label>
+                        <textarea id="payload" name="payload" rows="8" class="form-control">{"event": "test"}</textarea>
+                        <small class="form-help">The JSON payload to send with the webhook</small>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Send Webhook</button>
+                        <a href="/ui/subscriptions" class="btn btn-secondary">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
 </body>
 </html>

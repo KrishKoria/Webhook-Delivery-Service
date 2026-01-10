@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Dead Letter Queue - Webhook Delivery Service</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <nav class="navbar">
+      <a href="/ui/dashboard" class="navbar-brand">Webhook Service</a>
+      <ul class="navbar-nav">
+        <li><a href="/ui/dashboard">Dashboard</a></li>
+        <li><a href="/ui/subscriptions">Subscriptions</a></li>
+        <li><a href="/ui/backlog">Backlog</a></li>
+        <li><a href="/ui/dlq" class="active">Dead Letter Queue</a></li>
+        <li><a href="/ui/scheduled">Scheduled</a></li>
+      </ul>
+    </nav>
+
+    <div class="container">
+      <h1>Dead Letter Queue</h1>
+      <p class="page-subtitle">Failed deliveries across all subscriptions</p>
+
+      <!-- Stats Cards -->
+      <div class="dashboard-grid">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Total in DLQ</span>
+            <div class="card-icon red">T</div>
+          </div>
+          <div class="card-value">{{ .Stats.Total }}</div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Dead</span>
+            <div class="card-icon red">D</div>
+          </div>
+          <div class="card-value">{{ .Stats.Dead }}</div>
+          <div class="card-subtitle">Awaiting retry or deletion</div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Retried</span>
+            <div class="card-icon green">R</div>
+          </div>
+          <div class="card-value">{{ .Stats.Retried }}</div>
+          <div class="card-subtitle">Successfully requeued</div>
+        </div>
+      </div>
+
+      <!-- Action Bar -->
+      <div class="action-bar">
+        <div class="action-bar-left">
+          <input type="checkbox" id="selectAll" onclick="toggleSelectAll()" />
+          <label for="selectAll" style="margin: 0">Select All</label>
+          <span
+            id="selectedCount"
+            style="color: #64748b; margin-left: 16px"
+          ></span>
+        </div>
+        <div class="action-bar-right">
+          <button
+            onclick="bulkRetry()"
+            class="btn btn-success btn-sm"
+            id="bulkRetryBtn"
+            disabled
+          >
+            Retry Selected
+          </button>
+          <button
+            onclick="bulkDelete()"
+            class="btn btn-danger btn-sm"
+            id="bulkDeleteBtn"
+            disabled
+          >
+            Delete Selected
+          </button>
+        </div>
+      </div>
+
+      <!-- Filter Bar -->
+      <div class="action-bar" style="margin-top: 8px">
+        <div class="action-bar-left">
+          <span>Filter by status:</span>
+          <select id="statusFilter" onchange="filterByStatus()">
+            <option value="">All</option>
+            <option value="dead">Dead</option>
+            <option value="retried">Retried</option>
+            <option value="deleted">Deleted</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- DLQ Table -->
+      {{ if .Tasks }}
+      <table id="dlqTable">
+        <thead>
+          <tr>
+            <th style="width: 40px"></th>
+            <th>ID</th>
+            <th>Subscription</th>
+            <th>Reason</th>
+            <th>Attempts</th>
+            <th>Failed At</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{ range .Tasks }}
+          <tr data-status="{{ .Status }}" data-id="{{ .ID }}">
+            <td>
+              {{ if eq .Status "dead" }}
+              <input
+                type="checkbox"
+                class="task-checkbox"
+                value="{{ .ID }}"
+                onclick="updateSelection()"
+              />
+              {{ end }}
+            </td>
+            <td><code>{{ .ID }}</code></td>
+            <td>
+              <a href="/ui/subscriptions/{{ .SubscriptionID }}/dlq"
+                >{{ .SubscriptionID }}</a
+              >
+            </td>
+            <td
+              style="
+                max-width: 200px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+              "
+            >
+              {{ .Reason }}
+            </td>
+            <td>{{ .AttemptCount }}</td>
+            <td>{{ .FailedAt.Format "2006-01-02 15:04" }}</td>
+            <td>
+              <span class="badge badge-{{ .Status }}">{{ .Status }}</span>
+            </td>
+            <td>
+              {{ if eq .Status "dead" }}
+              <form
+                method="POST"
+                action="/ui/dlq/{{ .ID }}/retry"
+                style="display: inline"
+              >
+                <button type="submit" class="btn btn-sm btn-success">
+                  Retry
+                </button>
+              </form>
+              {{ end }}
+              <form
+                method="POST"
+                action="/ui/dlq/{{ .ID }}/delete"
+                style="display: inline"
+                onsubmit="return confirm('Delete this DLQ task?');"
+              >
+                <button type="submit" class="btn btn-sm btn-danger">
+                  Delete
+                </button>
+              </form>
+            </td>
+          </tr>
+          {{ end }}
+        </tbody>
+      </table>
+
+      <!-- Pagination -->
+      <div style="text-align: center; margin: 24px 0">
+        {{ if gt .Page 1 }}
+        <a href="/ui/dlq?page={{ subtract .Page 1 }}" class="btn btn-outline"
+          >Previous</a
+        >
+        {{ end }}
+        <span style="margin: 0 16px">Page {{ .Page }}</span>
+        {{ if .HasMore }}
+        <a href="/ui/dlq?page={{ add .Page 1 }}" class="btn btn-outline"
+          >Next</a
+        >
+        {{ end }}
+      </div>
+      {{ else }}
+      <p style="text-align: center; color: #64748b; margin-top: 40px">
+        No tasks in Dead Letter Queue.
+      </p>
+      {{ end }}
+    </div>
+
+    <script>
+      function toggleSelectAll() {
+        const selectAll = document.getElementById("selectAll");
+        const checkboxes = document.querySelectorAll(".task-checkbox");
+        checkboxes.forEach((cb) => {
+          if (cb.closest("tr").style.display !== "none") {
+            cb.checked = selectAll.checked;
+          }
+        });
+        updateSelection();
+      }
+
+      function updateSelection() {
+        const checkboxes = document.querySelectorAll(".task-checkbox:checked");
+        const count = checkboxes.length;
+        const countSpan = document.getElementById("selectedCount");
+        const retryBtn = document.getElementById("bulkRetryBtn");
+        const deleteBtn = document.getElementById("bulkDeleteBtn");
+
+        countSpan.textContent = count > 0 ? `${count} selected` : "";
+        retryBtn.disabled = count === 0;
+        deleteBtn.disabled = count === 0;
+      }
+
+      function filterByStatus() {
+        const filter = document.getElementById("statusFilter").value;
+        const rows = document.querySelectorAll("#dlqTable tbody tr");
+
+        rows.forEach((row) => {
+          const status = row.getAttribute("data-status");
+          if (filter === "" || status === filter) {
+            row.style.display = "";
+          } else {
+            row.style.display = "none";
+          }
+        });
+
+        // Uncheck all and update
+        document.getElementById("selectAll").checked = false;
+        document
+          .querySelectorAll(".task-checkbox")
+          .forEach((cb) => (cb.checked = false));
+        updateSelection();
+      }
+
+      function getSelectedIds() {
+        const checkboxes = document.querySelectorAll(".task-checkbox:checked");
+        return Array.from(checkboxes).map((cb) => cb.value);
+      }
+
+      function bulkRetry() {
+        const ids = getSelectedIds();
+        if (ids.length === 0) return;
+
+        if (!confirm(`Retry ${ids.length} task(s)?`)) return;
+
+        fetch("/api/dlq/bulk-retry", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dlq_ids: ids }),
+        })
+          .then((res) => res.json())
+          .then((data) => {
+            alert(`Retried: ${data.retried}, Failed: ${data.failed}`);
+            window.location.reload();
+          })
+          .catch((err) => {
+            alert("Error: " + err.message);
+          });
+      }
+
+      function bulkDelete() {
+        const ids = getSelectedIds();
+        if (ids.length === 0) return;
+
+        if (!confirm(`Delete ${ids.length} task(s)? This cannot be undone.`))
+          return;
+
+        // Delete one by one (no bulk delete API yet)
+        Promise.all(
+          ids.map((id) => fetch(`/api/dlq/${id}`, { method: "DELETE" }))
+        )
+          .then(() => {
+            window.location.reload();
+          })
+          .catch((err) => {
+            alert("Error: " + err.message);
+          });
+      }
+    </script>
+  </body>
+</html>

@@ -24,6 +24,12 @@ type WebhookHandler struct {
 func RegisterWebhookRoutes(r *gin.Engine, h *WebhookHandler) {
     r.POST("/ingest/:subscription_id", h.IngestWebhook)
 }
+
+// RegisterWebhookRoutesGroup registers webhook routes on a RouterGroup (for middleware).
+func RegisterWebhookRoutesGroup(rg *gin.RouterGroup, h *WebhookHandler) {
+    rg.POST("/ingest/:subscription_id", h.IngestWebhook)
+}
+
 // IngestWebhook handles incoming webhooks.
 func (h *WebhookHandler) IngestWebhook(c *gin.Context) {
     subID := c.Param("subscription_id")
@@ -38,7 +44,7 @@ func (h *WebhookHandler) IngestWebhook(c *gin.Context) {
         sub, err = h.Queries.GetSubscription(c, subID)
         if err != nil {
             log.Printf("Error fetching subscription %s from DB: %v", subID, err)
-            c.JSON(http.StatusNotFound, gin.H{"error": "subscription not found"})
+            RespondNotFound(c, "subscription")
             return
         }
         if h.Cache != nil { 
@@ -47,20 +53,22 @@ func (h *WebhookHandler) IngestWebhook(c *gin.Context) {
     }
     body, err := io.ReadAll(c.Request.Body)
     if err != nil {
-        c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+        RespondError(c, http.StatusBadRequest, "invalid request body", ErrCodeBadRequest)
         return
     }
     defer c.Request.Body.Close()
 
+    // Event allowlist check - returns 204 No Content if not allowed (not an error)
     if !subscriptionAllowsEvent(sub, eventType) {
         c.Status(http.StatusNoContent)
         return
     }
 
+    // Signature verification for subscriptions with secrets configured
     if sub.Secret.Valid && sub.Secret.String != "" {
         sig := c.GetHeader("X-Hub-Signature-256")
         if !verifySignature(body, sub.Secret.String, sig) {
-            c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid signature"})
+            RespondUnauthorized(c, "invalid signature")
             return
         }
     }
@@ -73,7 +81,7 @@ func (h *WebhookHandler) IngestWebhook(c *gin.Context) {
     })
     if err != nil {
         log.Printf("Error creating delivery task for subscription %s: %v", subID, err)
-        c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to queue delivery"})
+        RespondInternalError(c)
         return
     }
 
