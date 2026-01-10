@@ -227,13 +227,14 @@ func (h *DashboardHandler) BacklogPage(c *gin.Context) {
 			SubscriptionURL: task.SubscriptionUrl,
 			Status:          task.Status,
 			AttemptCount:    task.AttemptCount,
-			CreatedAt:       task.CreatedAt,
+			CreatedAt:       task.CreatedAt.ToTime(),
 		}
 		if task.ClaimedBy.Valid {
 			activeResponse[i].ClaimedBy = &task.ClaimedBy.String
 		}
 		if task.LeaseUntil.Valid {
-			activeResponse[i].LeaseUntil = &task.LeaseUntil.Time
+			t := task.LeaseUntil.Time
+			activeResponse[i].LeaseUntil = &t
 		}
 	}
 
@@ -247,10 +248,11 @@ func (h *DashboardHandler) BacklogPage(c *gin.Context) {
 			SubscriptionURL: task.SubscriptionUrl,
 			Status:          task.Status,
 			AttemptCount:    task.AttemptCount,
-			CreatedAt:       task.CreatedAt,
+			CreatedAt:       task.CreatedAt.ToTime(),
 		}
 		if task.NextAttemptAt.Valid {
-			retryingResponse[i].NextAttemptAt = &task.NextAttemptAt.Time
+			t := task.NextAttemptAt.Time
+			retryingResponse[i].NextAttemptAt = &t
 		}
 	}
 

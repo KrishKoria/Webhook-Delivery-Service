@@ -9,7 +9,8 @@ import (
 	"context"
 	"database/sql"
 	"strings"
-	"time"
+
+	"github.com/KrishKoria/Webhook-Delivery-Service/internal/types"
 )
 
 const bulkDeleteDLQTasks = `-- name: BulkDeleteDLQTasks :exec
@@ -168,9 +169,9 @@ type InsertDeadLetterTaskParams struct {
 	OriginalTaskID string
 	SubscriptionID string
 	Payload        string
-	FailedAt       time.Time
+	FailedAt       types.LibSQLTime
 	Reason         string
-	LastAttemptAt  sql.NullTime
+	LastAttemptAt  types.LibSQLNullTime
 	AttemptCount   int64
 	Status         string
 	TargetUrl      sql.NullString
@@ -349,7 +350,7 @@ DELETE FROM dead_letter_tasks
 WHERE status = 'retried' AND last_attempt_at < ?
 `
 
-func (q *Queries) PurgeRetriedDLQTasks(ctx context.Context, lastAttemptAt sql.NullTime) error {
+func (q *Queries) PurgeRetriedDLQTasks(ctx context.Context, lastAttemptAt types.LibSQLNullTime) error {
 	_, err := q.db.ExecContext(ctx, purgeRetriedDLQTasks, lastAttemptAt)
 	return err
 }
@@ -362,7 +363,7 @@ WHERE id = ?
 
 type UpdateDeadLetterTaskStatusParams struct {
 	Status        string
-	LastAttemptAt sql.NullTime
+	LastAttemptAt types.LibSQLNullTime
 	ErrorDetails  sql.NullString
 	ID            string
 }

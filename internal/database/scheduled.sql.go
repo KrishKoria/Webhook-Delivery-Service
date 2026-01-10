@@ -8,7 +8,8 @@ package database
 import (
 	"context"
 	"database/sql"
-	"time"
+
+	"github.com/KrishKoria/Webhook-Delivery-Service/internal/types"
 )
 
 const countScheduledWebhooksByStatus = `-- name: CountScheduledWebhooksByStatus :one
@@ -54,7 +55,7 @@ type CreateScheduledWebhookParams struct {
 	ID             string
 	SubscriptionID string
 	Payload        string
-	ScheduledFor   time.Time
+	ScheduledFor   types.LibSQLTime
 	Recurrence     sql.NullString
 }
 
@@ -83,7 +84,7 @@ SELECT id, subscription_id, payload, scheduled_for, recurrence, status, created_
 WHERE scheduled_for <= ? AND status = 'pending'
 `
 
-func (q *Queries) GetDueScheduledWebhooks(ctx context.Context, scheduledFor time.Time) ([]ScheduledWebhook, error) {
+func (q *Queries) GetDueScheduledWebhooks(ctx context.Context, scheduledFor types.LibSQLTime) ([]ScheduledWebhook, error) {
 	rows, err := q.db.QueryContext(ctx, getDueScheduledWebhooks, scheduledFor)
 	if err != nil {
 		return nil, err

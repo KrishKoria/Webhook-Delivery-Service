@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/database"
+	"github.com/KrishKoria/Webhook-Delivery-Service/internal/types"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -89,7 +90,7 @@ func (h *DLQHandler) RetryDLQTask(c *gin.Context) {
     // Mark DLQ as retried
     _ = h.Queries.UpdateDeadLetterTaskStatus(c, database.UpdateDeadLetterTaskStatusParams{
         Status:        "retried",
-        LastAttemptAt: sql.NullTime{Time: time.Now(), Valid: true},
+        LastAttemptAt: types.NewLibSQLNullTime(time.Now()),
         ErrorDetails:  sql.NullString{String: "Retried via UI", Valid: true},
         ID:            id,
     })
@@ -260,7 +261,7 @@ func (h *DLQHandler) RetryDLQTaskAPI(c *gin.Context) {
     // Mark DLQ as retried
     err = h.Queries.UpdateDeadLetterTaskStatus(c, database.UpdateDeadLetterTaskStatusParams{
         Status:        "retried",
-        LastAttemptAt: sql.NullTime{Time: time.Now(), Valid: true},
+        LastAttemptAt: types.NewLibSQLNullTime(time.Now()),
         ErrorDetails:  sql.NullString{String: "Retried via API", Valid: true},
         ID:            id,
     })
@@ -340,7 +341,7 @@ func (h *DLQHandler) BulkRetryDLQAPI(c *gin.Context) {
         // Mark DLQ as retried
         _ = h.Queries.UpdateDeadLetterTaskStatus(c, database.UpdateDeadLetterTaskStatusParams{
             Status:        "retried",
-            LastAttemptAt: sql.NullTime{Time: time.Now(), Valid: true},
+            LastAttemptAt: types.NewLibSQLNullTime(time.Now()),
             ErrorDetails:  sql.NullString{String: "Retried via bulk API", Valid: true},
             ID:            id,
         })

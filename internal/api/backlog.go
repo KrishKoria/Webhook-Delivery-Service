@@ -222,19 +222,22 @@ func (h *BacklogHandler) ListBacklogTasks(c *gin.Context) {
 			SubscriptionURL: task.SubscriptionUrl,
 			Status:          task.Status,
 			AttemptCount:    task.AttemptCount,
-			CreatedAt:       task.CreatedAt,
+			CreatedAt:       task.CreatedAt.ToTime(),
 		}
 		if task.LastAttemptAt.Valid {
-			response[i].LastAttemptAt = &task.LastAttemptAt.Time
+			t := task.LastAttemptAt.Time
+			response[i].LastAttemptAt = &t
 		}
 		if task.NextAttemptAt.Valid {
-			response[i].NextAttemptAt = &task.NextAttemptAt.Time
+			t := task.NextAttemptAt.Time
+			response[i].NextAttemptAt = &t
 		}
 		if task.ClaimedBy.Valid {
 			response[i].ClaimedBy = &task.ClaimedBy.String
 		}
 		if task.LeaseUntil.Valid {
-			response[i].LeaseUntil = &task.LeaseUntil.Time
+			t := task.LeaseUntil.Time
+			response[i].LeaseUntil = &t
 		}
 	}
 
@@ -268,19 +271,22 @@ func (h *BacklogHandler) ListRetryingTasks(c *gin.Context) {
 			SubscriptionURL: task.SubscriptionUrl,
 			Status:          task.Status,
 			AttemptCount:    task.AttemptCount,
-			CreatedAt:       task.CreatedAt,
+			CreatedAt:       task.CreatedAt.ToTime(),
 		}
 		if task.LastAttemptAt.Valid {
-			response[i].LastAttemptAt = &task.LastAttemptAt.Time
+			t := task.LastAttemptAt.Time
+			response[i].LastAttemptAt = &t
 		}
 		if task.NextAttemptAt.Valid {
-			response[i].NextAttemptAt = &task.NextAttemptAt.Time
+			t := task.NextAttemptAt.Time
+			response[i].NextAttemptAt = &t
 		}
 		if task.ClaimedBy.Valid {
 			response[i].ClaimedBy = &task.ClaimedBy.String
 		}
 		if task.LeaseUntil.Valid {
-			response[i].LeaseUntil = &task.LeaseUntil.Time
+			t := task.LeaseUntil.Time
+			response[i].LeaseUntil = &t
 		}
 	}
 
@@ -314,19 +320,22 @@ func (h *BacklogHandler) ListActiveClaimedTasks(c *gin.Context) {
 			SubscriptionURL: task.SubscriptionUrl,
 			Status:          task.Status,
 			AttemptCount:    task.AttemptCount,
-			CreatedAt:       task.CreatedAt,
+			CreatedAt:       task.CreatedAt.ToTime(),
 		}
 		if task.LastAttemptAt.Valid {
-			response[i].LastAttemptAt = &task.LastAttemptAt.Time
+			t := task.LastAttemptAt.Time
+			response[i].LastAttemptAt = &t
 		}
 		if task.NextAttemptAt.Valid {
-			response[i].NextAttemptAt = &task.NextAttemptAt.Time
+			t := task.NextAttemptAt.Time
+			response[i].NextAttemptAt = &t
 		}
 		if task.ClaimedBy.Valid {
 			response[i].ClaimedBy = &task.ClaimedBy.String
 		}
 		if task.LeaseUntil.Valid {
-			response[i].LeaseUntil = &task.LeaseUntil.Time
+			t := task.LeaseUntil.Time
+			response[i].LeaseUntil = &t
 		}
 	}
 
