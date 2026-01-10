@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/database"
+	"github.com/KrishKoria/Webhook-Delivery-Service/internal/types"
 	"github.com/google/uuid"
 )
 
@@ -33,7 +34,7 @@ func (w *ScheduledWorker) Start(ctx context.Context) {
 
 func (w *ScheduledWorker) processDueScheduledWebhooks(ctx context.Context) {
     now := time.Now()
-    tasks, err := w.Queries.GetDueScheduledWebhooks(ctx, now)
+    tasks, err := w.Queries.GetDueScheduledWebhooks(ctx, types.NewLibSQLTime(now))
     if err != nil {
         log.Printf("Scheduled Worker: Error fetching due webhooks: %v", err)
         return
@@ -61,13 +62,13 @@ func (w *ScheduledWorker) processDueScheduledWebhooks(ctx context.Context) {
             ID:     task.ID,
         })
 
-        next := nextOccurrence(task.ScheduledFor, task.Recurrence.String)
+        next := nextOccurrence(task.ScheduledFor.ToTime(), task.Recurrence.String)
         if next.After(now) && task.Recurrence.String != "none" {
             _ = w.Queries.CreateScheduledWebhook(ctx, database.CreateScheduledWebhookParams{
                 ID:             uuid.New().String(),
                 SubscriptionID: task.SubscriptionID,
                 Payload:        task.Payload,
-                ScheduledFor:   next,
+                ScheduledFor:   types.NewLibSQLTime(next),
                 Recurrence:     task.Recurrence,
             })
         }

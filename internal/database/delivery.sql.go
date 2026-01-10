@@ -8,7 +8,8 @@ package database
 import (
 	"context"
 	"database/sql"
-	"time"
+
+	"github.com/KrishKoria/Webhook-Delivery-Service/internal/types"
 )
 
 const claimDeliveryTask = `-- name: ClaimDeliveryTask :one
@@ -77,7 +78,7 @@ type CreateDeliveryLogParams struct {
 	DeliveryTaskID string
 	SubscriptionID string
 	TargetUrl      string
-	Timestamp      time.Time
+	Timestamp      types.LibSQLTime
 	AttemptNumber  int64
 	Outcome        string
 	HttpStatus     sql.NullInt64
@@ -473,7 +474,7 @@ type GetRecentFailedDeliveriesRow struct {
 	DeliveryTaskID         string
 	SubscriptionID         string
 	TargetUrl              string
-	Timestamp              time.Time
+	Timestamp              types.LibSQLTime
 	AttemptNumber          int64
 	Outcome                string
 	HttpStatus             sql.NullInt64
@@ -594,14 +595,14 @@ type ListActiveClaimedTasksRow struct {
 	ID              string
 	SubscriptionID  string
 	Payload         string
-	CreatedAt       time.Time
+	CreatedAt       types.LibSQLTime
 	Status          string
-	LastAttemptAt   sql.NullTime
+	LastAttemptAt   types.LibSQLNullTime
 	AttemptCount    int64
-	NextAttemptAt   sql.NullTime
-	ClaimedAt       sql.NullTime
+	NextAttemptAt   types.LibSQLNullTime
+	ClaimedAt       types.LibSQLNullTime
 	ClaimedBy       sql.NullString
-	LeaseUntil      sql.NullTime
+	LeaseUntil      types.LibSQLNullTime
 	SubscriptionUrl string
 }
 
@@ -657,14 +658,14 @@ type ListBacklogTasksRow struct {
 	ID              string
 	SubscriptionID  string
 	Payload         string
-	CreatedAt       time.Time
+	CreatedAt       types.LibSQLTime
 	Status          string
-	LastAttemptAt   sql.NullTime
+	LastAttemptAt   types.LibSQLNullTime
 	AttemptCount    int64
-	NextAttemptAt   sql.NullTime
-	ClaimedAt       sql.NullTime
+	NextAttemptAt   types.LibSQLNullTime
+	ClaimedAt       types.LibSQLNullTime
 	ClaimedBy       sql.NullString
-	LeaseUntil      sql.NullTime
+	LeaseUntil      types.LibSQLNullTime
 	SubscriptionUrl string
 }
 
@@ -852,7 +853,7 @@ type ListRecentDeliveryLogsForSubscriptionRow struct {
 	DeliveryTaskID string
 	SubscriptionID string
 	TargetUrl      string
-	Timestamp      time.Time
+	Timestamp      types.LibSQLTime
 	AttemptNumber  int64
 	Outcome        string
 	HttpStatus     sql.NullInt64
@@ -909,14 +910,14 @@ type ListRetryingTasksRow struct {
 	ID              string
 	SubscriptionID  string
 	Payload         string
-	CreatedAt       time.Time
+	CreatedAt       types.LibSQLTime
 	Status          string
-	LastAttemptAt   sql.NullTime
+	LastAttemptAt   types.LibSQLNullTime
 	AttemptCount    int64
-	NextAttemptAt   sql.NullTime
-	ClaimedAt       sql.NullTime
+	NextAttemptAt   types.LibSQLNullTime
+	ClaimedAt       types.LibSQLNullTime
 	ClaimedBy       sql.NullString
-	LeaseUntil      sql.NullTime
+	LeaseUntil      types.LibSQLNullTime
 	SubscriptionUrl string
 }
 
@@ -978,7 +979,7 @@ WHERE id = ?
 `
 
 type UpdateDeliveryTaskNextAttemptAtParams struct {
-	NextAttemptAt sql.NullTime
+	NextAttemptAt types.LibSQLNullTime
 	ID            string
 }
 
@@ -995,7 +996,7 @@ WHERE id = ?
 
 type UpdateDeliveryTaskStatusParams struct {
 	Status        string
-	LastAttemptAt sql.NullTime
+	LastAttemptAt types.LibSQLNullTime
 	AttemptCount  int64
 	ID            string
 }
@@ -1023,7 +1024,7 @@ WHERE id = ?
 
 type UpdateDeliveryTaskStatusAndReleaseLeaseParams struct {
 	Status        string
-	LastAttemptAt sql.NullTime
+	LastAttemptAt types.LibSQLNullTime
 	AttemptCount  int64
 	ID            string
 }

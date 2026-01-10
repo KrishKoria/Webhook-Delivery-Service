@@ -6,7 +6,8 @@ package database
 
 import (
 	"database/sql"
-	"time"
+
+	"github.com/KrishKoria/Webhook-Delivery-Service/internal/types"
 )
 
 type DeadLetterTask struct {
@@ -14,9 +15,9 @@ type DeadLetterTask struct {
 	OriginalTaskID string
 	SubscriptionID string
 	Payload        string
-	FailedAt       time.Time
+	FailedAt       types.LibSQLTime
 	Reason         string
-	LastAttemptAt  sql.NullTime
+	LastAttemptAt  types.LibSQLNullTime
 	AttemptCount   int64
 	Status         string
 	TargetUrl      sql.NullString
@@ -29,7 +30,7 @@ type DeliveryLog struct {
 	DeliveryTaskID string
 	SubscriptionID string
 	TargetUrl      string
-	Timestamp      time.Time
+	Timestamp      types.LibSQLTime
 	AttemptNumber  int64
 	Outcome        string
 	HttpStatus     sql.NullInt64
@@ -40,32 +41,32 @@ type DeliveryTask struct {
 	ID             string
 	SubscriptionID string
 	Payload        string
-	CreatedAt      time.Time
+	CreatedAt      types.LibSQLTime
 	Status         string
-	LastAttemptAt  sql.NullTime
+	LastAttemptAt  types.LibSQLNullTime
 	AttemptCount   int64
-	NextAttemptAt  sql.NullTime
-	ClaimedAt      sql.NullTime
+	NextAttemptAt  types.LibSQLNullTime
+	ClaimedAt      types.LibSQLNullTime
 	ClaimedBy      sql.NullString
-	LeaseUntil     sql.NullTime
+	LeaseUntil     types.LibSQLNullTime
 }
 
 type ScheduledWebhook struct {
 	ID             string
 	SubscriptionID string
 	Payload        string
-	ScheduledFor   time.Time
+	ScheduledFor   types.LibSQLTime
 	Recurrence     sql.NullString
 	Status         string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	CreatedAt      types.LibSQLTime
+	UpdatedAt      types.LibSQLTime
 }
 
 type Subscription struct {
 	ID         string
 	TargetUrl  string
 	Secret     sql.NullString
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	CreatedAt  types.LibSQLTime
+	UpdatedAt  types.LibSQLTime
 	EventTypes sql.NullString
 }

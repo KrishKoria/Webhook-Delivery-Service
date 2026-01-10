@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/database"
+	"github.com/KrishKoria/Webhook-Delivery-Service/internal/types"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -97,7 +98,7 @@ func (h *ScheduledHandler) CreateScheduled(c *gin.Context) {
         ID:             id,
         SubscriptionID: subscriptionID,
         Payload:        payload,
-        ScheduledFor:   scheduledFor, 
+        ScheduledFor:   types.NewLibSQLTime(scheduledFor), 
         Recurrence:     sql.NullString{String: recurrence, Valid: recurrence != "" && recurrence != "none"},
     })
     if err != nil {
@@ -205,7 +206,7 @@ func (h *ScheduledHandler) CreateScheduledAPI(c *gin.Context) {
         ID:             id,
         SubscriptionID: req.SubscriptionID,
         Payload:        req.Payload,
-        ScheduledFor:   scheduledFor,
+        ScheduledFor:   types.NewLibSQLTime(scheduledFor),
         Recurrence:     sql.NullString{String: req.Recurrence, Valid: req.Recurrence != "" && req.Recurrence != "none"},
     })
     if err != nil {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/cache"
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/database"
+	"github.com/KrishKoria/Webhook-Delivery-Service/internal/types"
 	"github.com/google/uuid"
 )
 
@@ -98,6 +99,7 @@ func (w *Worker) Start(ctx context.Context) {
         select {
         case <-ticker.C:
             // Try to claim and process tasks up to concurrency limit
+        claimLoop:
             for i := 0; i < w.Concurrency; i++ {
                 select {
                 case sem <- struct{}{}: // Acquire semaphore
@@ -107,7 +109,7 @@ func (w *Worker) Start(ctx context.Context) {
                     }()
                 default:
                     // All slots busy, wait for next tick
-                    break
+                    break claimLoop
                 }
             }
         case <-ctx.Done():
@@ -181,7 +183,7 @@ func (w *Worker) processTask(ctx context.Context, task database.DeliveryTask) {
         DeliveryTaskID: task.ID,
         SubscriptionID: task.SubscriptionID,
         TargetUrl:      sub.TargetUrl,
-        Timestamp:      time.Now(),
+        Timestamp:      types.NewLibSQLTime(time.Now()),
         AttemptNumber:  int64(attempt),
         Outcome:        status,
         HttpStatus: sql.NullInt64{
@@ -208,10 +210,7 @@ func (w *Worker) processTask(ctx context.Context, task database.DeliveryTask) {
     // Update task status and release lease
     err = w.Queries.UpdateDeliveryTaskStatusAndReleaseLease(ctx, database.UpdateDeliveryTaskStatusAndReleaseLeaseParams{
         Status: newStatus,
-        LastAttemptAt: sql.NullTime{
-            Time:  time.Now(),
-            Valid: true,
-        },
+        LastAttemptAt: types.NewLibSQLNullTime(time.Now()),
         AttemptCount: int64(attempt),
         ID:           task.ID,
     })
@@ -226,12 +225,9 @@ func (w *Worker) processTask(ctx context.Context, task database.DeliveryTask) {
             OriginalTaskID: task.ID,
             SubscriptionID: task.SubscriptionID,
             Payload:        task.Payload,
-            FailedAt:       time.Now(),
+            FailedAt:       types.NewLibSQLTime(time.Now()),
             Reason:         errMsg,
-            LastAttemptAt: sql.NullTime{
-                Time:  time.Now(),
-                Valid: true,
-            },
+            LastAttemptAt:  types.NewLibSQLNullTime(time.Now()),
             AttemptCount: int64(attempt),
             Status:       "pending",
             TargetUrl: sql.NullString{
@@ -258,10 +254,7 @@ func (w *Worker) processTask(ctx context.Context, task database.DeliveryTask) {
 
         err = w.Queries.UpdateDeliveryTaskNextAttemptAt(ctx, database.UpdateDeliveryTaskNextAttemptAtParams{
             ID: task.ID,
-            NextAttemptAt: sql.NullTime{
-                Time:  nextAttempt,
-                Valid: true,
-            },
+            NextAttemptAt: types.NewLibSQLNullTime(nextAttempt),
         })
         if err != nil {
             log.Printf("Worker %s: Error updating next attempt time: %v", w.WorkerID, err)
