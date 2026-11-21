@@ -1,8 +1,6 @@
 package middleware
 
 import (
-	"log"
-
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -13,30 +11,35 @@ const RequestIDHeader = "X-Request-ID"
 // RequestIDContextKey is the context key for the request ID.
 const RequestIDContextKey = "request_id"
 
-// RequestID returns a Gin middleware that generates and attaches a unique request ID
-// to each request. The request ID is:
-// 1. Added to the response headers
-// 2. Stored in the Gin context for handlers and loggers to use
-// 3. Logged for correlation
+const maxRequestIDLen = 128
+
+// RequestID returns a Gin middleware that attaches a request ID to each request.
+// An upstream X-Request-ID is reused only when it is short and made of safe
+// characters, so it cannot inject content into logs or response headers.
 func RequestID() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Check if request already has an ID (e.g., from upstream proxy)
 		requestID := c.GetHeader(RequestIDHeader)
-		if requestID == "" {
+		if !validRequestID(requestID) {
 			requestID = uuid.New().String()
 		}
-
-		// Set in context for handlers to access
 		c.Set(RequestIDContextKey, requestID)
-
-		// Set in response header
 		c.Header(RequestIDHeader, requestID)
-
-		// Log the request with ID for correlation
-		log.Printf("[%s] %s %s", requestID, c.Request.Method, c.Request.URL.Path)
-
 		c.Next()
 	}
+}
+
+func validRequestID(id string) bool {
+	if id == "" || len(id) > maxRequestIDLen {
+		return false
+	}
+	for _, r := range id {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // GetRequestID retrieves the request ID from the Gin context.

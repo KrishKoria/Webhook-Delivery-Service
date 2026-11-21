@@ -5,19 +5,19 @@ ORDER BY created_at ASC
 LIMIT 10;
 
 -- name: CreateDeliveryTask :exec
-INSERT INTO delivery_tasks (id, subscription_id, payload, status, attempt_count, created_at)
-VALUES (?, ?, ?, 'pending', 0, CURRENT_TIMESTAMP);
+INSERT INTO delivery_tasks (id, subscription_id, payload, event_type, status, attempt_count, created_at, next_attempt_at)
+VALUES (?, ?, ?, ?, 'pending', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
 
 -- name: UpdateDeliveryTaskStatus :exec
 UPDATE delivery_tasks
-SET status = ?, last_attempt_at = ?, attempt_count = ?
+SET status = ?, last_attempt_at = CURRENT_TIMESTAMP, attempt_count = ?
 WHERE id = ?;
 
 -- name: CreateDeliveryLog :exec
 INSERT INTO delivery_logs (
     id, delivery_task_id, subscription_id, target_url, timestamp,
     attempt_number, outcome, http_status, error_details
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?);
 
 -- name: GetDeliveryTask :one
 SELECT * FROM delivery_tasks WHERE id = ?;
@@ -51,8 +51,8 @@ WHERE timestamp < datetime('now', '-72 hours');
 
 -- name: UpdateDeliveryTaskNextAttemptAt :exec
 UPDATE delivery_tasks
-SET next_attempt_at = ?
-WHERE id = ?;
+SET next_attempt_at = datetime('now', CAST(sqlc.arg(delay_seconds) AS INTEGER) || ' seconds')
+WHERE id = sqlc.arg(id);
 
 -- name: ClaimDeliveryTask :one
 -- Two-step atomic claim is required because Turso/libSQL doesn't support subqueries in WHERE.
@@ -108,7 +108,7 @@ WHERE status = 'pending'
 -- Update task status and release the lease in one operation.
 UPDATE delivery_tasks
 SET status = ?,
-    last_attempt_at = ?,
+    last_attempt_at = CURRENT_TIMESTAMP,
     attempt_count = ?,
     claimed_at = NULL,
     claimed_by = NULL,

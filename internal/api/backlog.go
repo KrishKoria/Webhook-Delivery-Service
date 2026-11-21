@@ -222,7 +222,7 @@ func (h *BacklogHandler) ListBacklogTasks(c *gin.Context) {
 			SubscriptionURL: task.SubscriptionUrl,
 			Status:          task.Status,
 			AttemptCount:    task.AttemptCount,
-			CreatedAt:       task.CreatedAt.ToTime(),
+			CreatedAt:       task.CreatedAt,
 		}
 		if task.LastAttemptAt.Valid {
 			t := task.LastAttemptAt.Time
@@ -271,7 +271,7 @@ func (h *BacklogHandler) ListRetryingTasks(c *gin.Context) {
 			SubscriptionURL: task.SubscriptionUrl,
 			Status:          task.Status,
 			AttemptCount:    task.AttemptCount,
-			CreatedAt:       task.CreatedAt.ToTime(),
+			CreatedAt:       task.CreatedAt,
 		}
 		if task.LastAttemptAt.Valid {
 			t := task.LastAttemptAt.Time
@@ -320,7 +320,7 @@ func (h *BacklogHandler) ListActiveClaimedTasks(c *gin.Context) {
 			SubscriptionURL: task.SubscriptionUrl,
 			Status:          task.Status,
 			AttemptCount:    task.AttemptCount,
-			CreatedAt:       task.CreatedAt.ToTime(),
+			CreatedAt:       task.CreatedAt,
 		}
 		if task.LastAttemptAt.Valid {
 			t := task.LastAttemptAt.Time

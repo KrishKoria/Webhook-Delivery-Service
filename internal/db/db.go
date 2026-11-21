@@ -1,70 +1,112 @@
+// Package db opens the application database and provides transaction helpers.
+//
+// Remote databases (turso://, libsql://, https://) use Turso's pure-Go
+// tursogo-serverless driver. file: URLs use modernc.org/sqlite for local
+// development and tests. Both drivers scan DATETIME columns into time.Time.
 package db
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"fmt"
-	"log"
-	"os"
 	"strings"
+	"time"
 
-	"github.com/joho/godotenv"
-	_ "github.com/tursodatabase/libsql-client-go/libsql"
+	"github.com/KrishKoria/Webhook-Delivery-Service/internal/database"
+	"github.com/pressly/goose/v3"
+	turso "turso.tech/database/tursogo-serverless"
+	_ "modernc.org/sqlite"
 )
 
+// DB is the process-wide database handle, set by Init.
 var DB *sql.DB
 
-func Init() error {
-	_ = godotenv.Load()
+// Dialect is the goose dialect matching the opened database.
+var Dialect goose.Dialect
 
-	dbURL := os.Getenv("TURSO_DATABASE_URL")
-	authToken := os.Getenv("TURSO_AUTH_TOKEN")
+// Config describes how to reach the database.
+type Config struct {
+	URL       string
+	AuthToken string
+}
 
-	if dbURL == "" {
-		return fmt.Errorf("TURSO_DATABASE_URL not set")
+// Open opens and pings a database for cfg, returning the handle and its goose dialect.
+func Open(ctx context.Context, cfg Config) (*sql.DB, goose.Dialect, error) {
+	if cfg.URL == "" {
+		return nil, "", errors.New("TURSO_DATABASE_URL not set")
 	}
 
-	var connStr string
-	isLocalFileDB := strings.HasPrefix(dbURL, "file:")
-
-	if isLocalFileDB {
-		connStr = dbURL
-		if authToken != "" {
-			log.Printf("Warning: TURSO_AUTH_TOKEN is set for a file-based TURSO_DATABASE_URL ('%s'). The token will be ignored for the application's DB connection.", dbURL)
+	var (
+		conn    *sql.DB
+		dialect goose.Dialect
+	)
+	if IsLocalURL(cfg.URL) {
+		dsn := cfg.URL
+		if !strings.Contains(dsn, "_pragma=") {
+			sep := "?"
+			if strings.Contains(dsn, "?") {
+				sep = "&"
+			}
+			// Foreign keys stay off (SQLite's default) to match the remote engine;
+			// the application deletes dependent rows explicitly.
+			dsn += sep + "_pragma=busy_timeout(5000)"
 		}
-		log.Printf("Application DB: Using local file database: %s", connStr)
+		var err error
+		conn, err = sql.Open("sqlite", dsn)
+		if err != nil {
+			return nil, "", fmt.Errorf("open local sqlite db: %w", err)
+		}
+		// SQLite allows one writer; a single connection avoids SQLITE_BUSY churn.
+		conn.SetMaxOpenConns(1)
+		dialect = goose.DialectSQLite3
 	} else {
-		// For remote Turso DBs (e.g., "libsql://..." or "https://...")
-		if authToken == "" {
-			return fmt.Errorf("TURSO_AUTH_TOKEN not set for remote Turso database URL: %s", dbURL)
+		if cfg.AuthToken == "" {
+			return nil, "", errors.New("TURSO_AUTH_TOKEN not set for remote database URL")
 		}
-		// Construct the connection string with authToken for remote DBs
-		if strings.Contains(dbURL, "?") {
-			connStr = fmt.Sprintf("%s&authToken=%s", dbURL, authToken)
-		} else {
-			connStr = fmt.Sprintf("%s?authToken=%s", dbURL, authToken)
-		}
-		log.Printf("Application DB: Using remote Turso database with token.")
+		conn = sql.OpenDB(turso.NewConnector(cfg.URL, cfg.AuthToken))
+		conn.SetMaxOpenConns(10)
+		conn.SetMaxIdleConns(5)
+		conn.SetConnMaxIdleTime(5 * time.Minute)
+		dialect = goose.DialectTurso
 	}
-	
-	// Use "libsql" driver name for libsql-client-go
-	db, err := sql.Open("libsql", connStr)
+
+	pingCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := conn.PingContext(pingCtx); err != nil {
+		_ = conn.Close()
+		return nil, "", fmt.Errorf("ping db: %w", err)
+	}
+	return conn, dialect, nil
+}
+
+// Init opens the database and stores it in the package-level DB and Dialect.
+func Init(ctx context.Context, cfg Config) error {
+	conn, dialect, err := Open(ctx, cfg)
 	if err != nil {
-		return fmt.Errorf("failed to open db with connection string '%s': %w", maskConnStr(connStr), err)
+		return err
 	}
-
-	if err := db.Ping(); err != nil {
-		return fmt.Errorf("failed to ping db: %w", err)
-	}
-
-	DB = db
-	log.Println("Application successfully connected to the database.")
+	DB, Dialect = conn, dialect
 	return nil
 }
 
-// maskConnStr masks the auth token in connection strings for logging
-func maskConnStr(connStr string) string {
-	if idx := strings.Index(connStr, "authToken="); idx != -1 {
-		return connStr[:idx+10] + "***MASKED***"
+// IsLocalURL reports whether url points at a local SQLite file.
+func IsLocalURL(url string) bool {
+	return strings.HasPrefix(url, "file:")
+}
+
+// WithTx runs fn inside a transaction, committing on success and rolling back on error.
+func WithTx(ctx context.Context, conn *sql.DB, fn func(q *database.Queries) error) error {
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
 	}
-	return connStr
+	if err := fn(database.New(tx)); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit tx: %w", err)
+	}
+	return nil
 }

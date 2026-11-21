@@ -13,7 +13,6 @@ import (
 
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/cache"
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/database"
-	"github.com/KrishKoria/Webhook-Delivery-Service/internal/types"
 	"github.com/google/uuid"
 )
 
@@ -183,7 +182,6 @@ func (w *Worker) processTask(ctx context.Context, task database.DeliveryTask) {
         DeliveryTaskID: task.ID,
         SubscriptionID: task.SubscriptionID,
         TargetUrl:      sub.TargetUrl,
-        Timestamp:      types.NewLibSQLTime(time.Now()),
         AttemptNumber:  int64(attempt),
         Outcome:        status,
         HttpStatus: sql.NullInt64{
@@ -210,7 +208,6 @@ func (w *Worker) processTask(ctx context.Context, task database.DeliveryTask) {
     // Update task status and release lease
     err = w.Queries.UpdateDeliveryTaskStatusAndReleaseLease(ctx, database.UpdateDeliveryTaskStatusAndReleaseLeaseParams{
         Status: newStatus,
-        LastAttemptAt: types.NewLibSQLNullTime(time.Now()),
         AttemptCount: int64(attempt),
         ID:           task.ID,
     })
@@ -225,11 +222,9 @@ func (w *Worker) processTask(ctx context.Context, task database.DeliveryTask) {
             OriginalTaskID: task.ID,
             SubscriptionID: task.SubscriptionID,
             Payload:        task.Payload,
-            FailedAt:       types.NewLibSQLTime(time.Now()),
             Reason:         errMsg,
-            LastAttemptAt:  types.NewLibSQLNullTime(time.Now()),
             AttemptCount: int64(attempt),
-            Status:       "pending",
+            Status:       "dead",
             TargetUrl: sql.NullString{
                 String: sub.TargetUrl,
                 Valid:  sub.TargetUrl != "",
@@ -250,11 +245,11 @@ func (w *Worker) processTask(ctx context.Context, task database.DeliveryTask) {
     // Schedule retry if needed
     if status != "success" && attempt < maxAttempts {
         backoff := getBackoffDuration(int(attempt))
-        nextAttempt := time.Now().Add(backoff)
+
 
         err = w.Queries.UpdateDeliveryTaskNextAttemptAt(ctx, database.UpdateDeliveryTaskNextAttemptAtParams{
             ID: task.ID,
-            NextAttemptAt: types.NewLibSQLNullTime(nextAttempt),
+            DelaySeconds: int64(backoff / time.Second),
         })
         if err != nil {
             log.Printf("Worker %s: Error updating next attempt time: %v", w.WorkerID, err)
