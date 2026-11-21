@@ -2,233 +2,250 @@ package api
 
 import (
 	"database/sql"
+	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
+	"net/url"
+	"strconv"
+	"time"
 
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/cache"
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/database"
+	"github.com/KrishKoria/Webhook-Delivery-Service/internal/ops"
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 )
 
-type UIHandler struct {
-    Queries *database.Queries
-    Cache *cache.RedisSubscriptionCache
+// UI serves the server-rendered admin interface. Reads go through Queries;
+// every mutation goes through ops so the UI and JSON API share one code path.
+type UI struct {
+	Q     *database.Queries
+	Ops   *ops.Ops
+	Cache *cache.RedisSubscriptionCache
+	Log   *slog.Logger
 }
 
-func RegisterUIRoutes(r *gin.Engine, h *UIHandler) {
-    r.GET("/ui/subscriptions", h.ListSubscriptionsPage)
-    r.GET("/ui/subscriptions/new", h.NewSubscriptionForm)
-    r.POST("/ui/subscriptions/new", h.CreateSubscriptionForm)
-    r.GET("/ui/subscriptions/:id/logs", h.SubscriptionLogsPage)
-    r.POST("/ui/subscriptions/:id/send", h.SendTestWebhook)
-    r.GET("/ui/subscriptions/:id/test", h.TestWebhookForm) 
-    r.GET("/ui/subscriptions/:id/analytics", h.SubscriptionAnalyticsPage)
-    r.GET("/api/subscriptions/:id/logs", h.GetLogsJSON)
-    r.GET("/ui/subscriptions/:id/edit", h.EditSubscriptionForm)
-    r.POST("/ui/subscriptions/:id/edit", h.UpdateSubscriptionForm)
-    r.POST("/ui/subscriptions/:id/delete", h.DeleteSubscription)
-    r.GET("/ui/subscriptions/:id/scheduled/new", h.NewScheduledPage) 
-    r.GET("/ui/subscriptions/:id/scheduled/list", h.ScheduledListPage) 
+// NewUI builds the admin UI handlers on conn.
+func NewUI(conn *sql.DB, c *cache.RedisSubscriptionCache, logger *slog.Logger) *UI {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	invalidate := func(id string) {
+		if c != nil {
+			c.Del(id)
+		}
+	}
+	return &UI{Q: database.New(conn), Ops: ops.New(conn, invalidate), Cache: c, Log: logger}
 }
 
-// RegisterUIRoutesGroup registers UI routes on a RouterGroup (for middleware).
-func RegisterUIRoutesGroup(rg *gin.RouterGroup, h *UIHandler) {
-    rg.GET("/ui/subscriptions", h.ListSubscriptionsPage)
-    rg.GET("/ui/subscriptions/new", h.NewSubscriptionForm)
-    rg.POST("/ui/subscriptions/new", h.CreateSubscriptionForm)
-    rg.GET("/ui/subscriptions/:id/logs", h.SubscriptionLogsPage)
-    rg.POST("/ui/subscriptions/:id/send", h.SendTestWebhook)
-    rg.GET("/ui/subscriptions/:id/test", h.TestWebhookForm)
-    rg.GET("/ui/subscriptions/:id/analytics", h.SubscriptionAnalyticsPage)
-    rg.GET("/api/subscriptions/:id/logs", h.GetLogsJSON)
-    rg.GET("/ui/subscriptions/:id/edit", h.EditSubscriptionForm)
-    rg.POST("/ui/subscriptions/:id/edit", h.UpdateSubscriptionForm)
-    rg.POST("/ui/subscriptions/:id/delete", h.DeleteSubscription)
-    rg.GET("/ui/subscriptions/:id/scheduled/new", h.NewScheduledPage)
-    rg.GET("/ui/subscriptions/:id/scheduled/list", h.ScheduledListPage)
+// RegisterAdminUI registers every /ui route (plus the "/" redirect) on rg.
+func RegisterAdminUI(rg *gin.RouterGroup, u *UI) {
+	toDashboard := func(c *gin.Context) { c.Redirect(http.StatusFound, "/ui/dashboard") }
+	rg.GET("/", toDashboard)
+	rg.GET("/ui", toDashboard)
+	rg.GET("/ui/dashboard", u.Dashboard)
+	rg.GET("/ui/backlog", u.Backlog)
+
+	rg.GET("/ui/subscriptions", u.ListSubscriptions)
+	rg.POST("/ui/subscriptions", u.CreateSubscription)
+	rg.GET("/ui/subscriptions/new", u.NewSubscription)
+	rg.GET("/ui/subscriptions/:id", u.SubscriptionHome)
+	rg.GET("/ui/subscriptions/:id/edit", u.EditSubscription)
+	rg.POST("/ui/subscriptions/:id/edit", u.UpdateSubscription)
+	rg.POST("/ui/subscriptions/:id/delete", u.DeleteSubscription)
+	rg.POST("/ui/subscriptions/:id/pause", u.PauseSubscription)
+	rg.POST("/ui/subscriptions/:id/resume", u.ResumeSubscription)
+	rg.GET("/ui/subscriptions/:id/test", u.TestForm)
+	rg.POST("/ui/subscriptions/:id/test", u.SendTest)
+	rg.GET("/ui/subscriptions/:id/logs", u.Logs)
+	rg.GET("/ui/subscriptions/:id/analytics", u.Analytics)
+	rg.GET("/ui/subscriptions/:id/dlq", u.SubscriptionDLQ)
+	rg.GET("/ui/subscriptions/:id/scheduled", u.SubscriptionScheduled)
+	rg.POST("/ui/subscriptions/:id/scheduled", u.CreateScheduled)
+	rg.GET("/ui/subscriptions/:id/scheduled/new", u.NewScheduled)
+	rg.GET("/ui/subscriptions/:id/scheduled/list", u.legacyScheduledList)
+
+	rg.POST("/ui/tasks/:task_id/redeliver", u.Redeliver)
+
+	rg.GET("/ui/dlq", u.ListDLQ)
+	rg.POST("/ui/dlq/bulk-retry", u.BulkRetryDLQ)
+	rg.POST("/ui/dlq/bulk-delete", u.BulkDeleteDLQ)
+	rg.GET("/ui/dlq/:dlq_id", u.DLQDetail)
+	rg.POST("/ui/dlq/:dlq_id/retry", u.RetryDLQ)
+	rg.POST("/ui/dlq/:dlq_id/delete", u.DeleteDLQ)
+
+	rg.GET("/ui/scheduled", u.ListScheduled)
+	rg.POST("/ui/scheduled/:id/cancel", u.CancelScheduled)
+	rg.POST("/ui/scheduled/:id/delete", u.DeleteScheduled)
 }
 
-// ListSubscriptionsPage handles GET /ui/subscriptions
-func (h *UIHandler) ListSubscriptionsPage(c *gin.Context) {
-    subs, err := h.Queries.ListSubscriptions(c)
-    if err != nil {
-        c.String(http.StatusInternalServerError, "Error: %v", err)
-        return
-    }
-    c.HTML(http.StatusOK, "subscriptions.html", gin.H{
-        "Subscriptions": subs,
-    })
+// Page is the data every full page receives; Data holds the page-specific view.
+type Page struct {
+	Title    string
+	Nav      string // which primary nav item is current
+	Flash    *Flash
+	Degraded []string // sections that failed to load
+	Live     bool     // the page polls; show the live status and pause toggle
+	Now      time.Time
+	Data     any
 }
-// NewSubscriptionForm handles GET /ui/subscriptions/new
-func (h *UIHandler) NewSubscriptionForm(c *gin.Context) {
-    c.HTML(http.StatusOK, "new_subscription.html", nil)
-}
-// EditSubscriptionForm handles GET /ui/subscriptions/:id/edit
-func (h *UIHandler) EditSubscriptionForm(c *gin.Context) {
-    id := c.Param("id")
-    sub, err := h.Queries.GetSubscription(c, id)
-    if err != nil {
-        c.String(404, "Subscription not found")
-        return
-    }
-    c.HTML(200, "edit_subscription.html", gin.H{"Subscription": sub})
-}
-// CreateSubscriptionForm handles POST /ui/subscriptions/new
-func (h *UIHandler) CreateSubscriptionForm(c *gin.Context) {
-    targetURL := c.PostForm("target_url")
-    secret := c.PostForm("secret")
-    eventTypes := c.PostForm("event_types")
-    id := uuid.New().String()
-    err := h.Queries.CreateSubscription(c, database.CreateSubscriptionParams{
-        ID:         id,
-        TargetUrl:  targetURL,
-        Secret:     sql.NullString{String: secret, Valid: secret != ""},
-        EventTypes: sql.NullString{String: eventTypes, Valid: eventTypes != ""},
-    })
-    if err != nil {
-        c.String(http.StatusInternalServerError, "Error: %v", err)
-        return
-    }
-    c.Redirect(http.StatusSeeOther, "/ui/subscriptions")
-}
-// UpdateSubscriptionForm handles POST /ui/subscriptions/:id/edit
-func (h *UIHandler) UpdateSubscriptionForm(c *gin.Context) {
-    id := c.Param("id")
-    targetURL := c.PostForm("target_url")
-    secret := c.PostForm("secret")
-    eventTypes := c.PostForm("event_types")
-    err := h.Queries.UpdateSubscription(c, database.UpdateSubscriptionParams{
-        TargetUrl:  targetURL,
-        Secret:     sql.NullString{String: secret, Valid: secret != ""},
-        EventTypes: sql.NullString{String: eventTypes, Valid: eventTypes != ""},
-        ID:         id,
-    })
-    if err != nil {
-        c.String(500, "Update failed: %v", err)
-        return
-    }
-    if h.Cache != nil {
-        h.Cache.Del(id)
-    }
-    c.Redirect(303, "/ui/subscriptions")
-}
-// DeleteSubscription handles POST /ui/subscriptions/:id/delete
-func (h *UIHandler) DeleteSubscription(c *gin.Context) {
-    id := c.Param("id")
-    err := h.Queries.DeleteSubscription(c, id)
-    if err != nil {
-        c.String(500, "Delete failed: %v", err)
-        return
-    }
-    if h.Cache != nil {
-        h.Cache.Del(id)
-    }
-    c.Redirect(303, "/ui/subscriptions")
-}
-// SubscriptionLogsPage handles GET /ui/subscriptions/:id/logs
-func (h *UIHandler) SubscriptionLogsPage(c *gin.Context) {
-    id := c.Param("id")
-    logs, err := h.Queries.ListRecentDeliveryLogsForSubscription(c, id)
-    if err != nil {
-        c.String(http.StatusInternalServerError, "Error: %v", err)
-        return
-    }
 
-    c.HTML(http.StatusOK, "logs.html", gin.H{
-        "SubscriptionID": id,
-        "Logs":           logs,
-    })
+// Flash is a one-off status message.
+type Flash struct {
+	Kind string // ok | error | info
+	Msg  string
 }
-// SendTestWebhook handles POST /ui/subscriptions/:id/send
-func (h *UIHandler) SendTestWebhook(c *gin.Context) {
-    id := c.Param("id")
-    payload := c.PostForm("payload")
-    // eventType := c.PostForm("event_type")  // Available if needed for logging
 
-    // Set defaults if not provided
-    if payload == "" {
-        payload = `{"event":"test","source":"admin_ui"}`
-    }
-
-    // Check subscription exists
-    _, err := h.Queries.GetSubscription(c, id)
-    if err != nil {
-        c.String(http.StatusNotFound, "Subscription not found")
-        return
-    }
-
-    // Create delivery task directly (bypasses signature verification for admin-initiated tests)
-    taskID := uuid.New().String()
-    err = h.Queries.CreateDeliveryTask(c, database.CreateDeliveryTaskParams{
-        ID:             taskID,
-        SubscriptionID: id,
-        Payload:        payload,
-    })
-    if err != nil {
-        c.String(http.StatusInternalServerError, "Error creating delivery task: %v", err)
-        return
-    }
-
-    c.Redirect(http.StatusSeeOther, "/ui/subscriptions/"+id+"/logs")
+// flashMessages are the only messages a ?flash= query can show, so the
+// parameter cannot be used to inject arbitrary text.
+var flashMessages = map[string]Flash{
+	"sub_created":      {"ok", "Subscription created."},
+	"sub_updated":      {"ok", "Subscription saved."},
+	"sub_deleted":      {"ok", "Subscription deleted, along with its logs, tasks and schedules."},
+	"sub_paused":       {"ok", "Deliveries paused. New events still queue up."},
+	"sub_resumed":      {"ok", "Deliveries resumed."},
+	"test_sent":        {"ok", "Test event queued. It appears below once the worker picks it up."},
+	"redelivered":      {"ok", "Redelivery queued as a new task."},
+	"dlq_retried":      {"ok", "Entry moved back to the delivery queue."},
+	"dlq_conflict":     {"info", "That entry was already retried."},
+	"dlq_deleted":      {"ok", "Entry deleted."},
+	"dlq_bulk_retried": {"ok", "%d %s moved back to the delivery queue."},
+	"dlq_bulk_partial": {"info", "%d %s retried; the rest were already retried or gone."},
+	"dlq_bulk_deleted": {"ok", "%d %s deleted."},
+	"dlq_none":         {"info", "Select at least one entry first."},
+	"sched_created":    {"ok", "Webhook scheduled."},
+	"sched_cancelled":  {"ok", "Scheduled webhook cancelled."},
+	"sched_deleted":    {"ok", "Scheduled webhook deleted."},
+	"sched_conflict":   {"info", "Only pending schedules can be cancelled."},
 }
-// SubscriptionAnalyticsPage handles GET /ui/subscriptions/:id/analytics
-func (h *UIHandler) SubscriptionAnalyticsPage(c *gin.Context) {
-    id := c.Param("id")
-    logs, err := h.Queries.ListRecentDeliveryLogsForSubscription(c, id)
-    if err != nil {
-        c.String(http.StatusInternalServerError, "Error: %v", err)
-        return
-    }
 
-    c.JSON(http.StatusOK, logs)
+func flashFromQuery(c *gin.Context) *Flash {
+	f, ok := flashMessages[c.Query("flash")]
+	if !ok {
+		return nil
+	}
+	if n, err := strconv.Atoi(c.Query("n")); err == nil && n >= 0 {
+		f.Msg = fmt.Sprintf(f.Msg, n, map[bool]string{true: "entry", false: "entries"}[n == 1])
+	}
+	return &f
 }
-// GetLogsJSON handles GET /api/subscriptions/:id/logs
-func (h *UIHandler) GetLogsJSON(c *gin.Context) {
-    id := c.Param("id")
-    logs, err := h.Queries.ListRecentDeliveryLogsForSubscription(c, id)
-    if err != nil {
-        c.JSON(500, gin.H{"error": err.Error()})
-        return
-    }
 
-    c.JSON(200, logs)
+func (u *UI) page(c *gin.Context, title, nav string, data any) *Page {
+	return &Page{Title: title, Nav: nav, Flash: flashFromQuery(c), Now: time.Now().UTC(), Data: data}
 }
-// NewScheduledPage handles GET /ui/subscriptions/:id/scheduled/new
-func (h *UIHandler) NewScheduledPage(c *gin.Context) {
-    subID := c.Param("id")
-    c.HTML(http.StatusOK, "new_scheduled.html", gin.H{
-        "SubscriptionID": subID,
-    })
+
+// degrade records a failed read so the page can show a banner instead of
+// silently rendering zeros.
+func (u *UI) degrade(c *gin.Context, p *Page, what string, err error) {
+	if err == nil {
+		return
+	}
+	u.Log.ErrorContext(c, "ui query failed", "section", what, "err", err)
+	p.Degraded = append(p.Degraded, what)
 }
-// ScheduledListPage handles GET /ui/subscriptions/:id/scheduled/list
-func (h *UIHandler) ScheduledListPage(c *gin.Context) {
-    subID := c.Param("id")
-    limit := int64(100)
-    offset := int64(0)  
 
-    scheduledItems, err := h.Queries.ListScheduledWebhooks(c, database.ListScheduledWebhooksParams{
-        SubscriptionID: subID,
-        Limit:          limit,
-        Offset:         offset,
-    })
-    if err != nil {
-        c.String(http.StatusInternalServerError, "Error fetching scheduled webhooks: %v", err)
-        return
-    }
+// isHX reports whether the request came from htmx and wants a fragment.
+func isHX(c *gin.Context) bool { return c.GetHeader("HX-Request") == "true" }
 
-    if scheduledItems == nil {
-        scheduledItems = []database.ScheduledWebhook{}
-    }
-
-    c.HTML(http.StatusOK, "scheduled_list.html", gin.H{
-        "SubscriptionID":    subID,
-        "ScheduledWebhooks": scheduledItems,
-    })
+// show renders the full page, or only the named fragment for htmx requests.
+func (u *UI) show(c *gin.Context, page, fragment string, p *Page) {
+	if fragment != "" && isHX(c) {
+		c.HTML(http.StatusOK, partialPrefix+fragment, p)
+		return
+	}
+	c.HTML(http.StatusOK, page, p)
 }
-// TestWebhookForm handles GET /ui/subscriptions/:id/test
-func (h *UIHandler) TestWebhookForm(c *gin.Context) {
-    subID := c.Param("id")
-    c.HTML(http.StatusOK, "send_test.html", gin.H{
-        "SubscriptionID": subID,
-    })
+
+// fail renders a styled error. htmx requests get an out-of-band toast only, so
+// the main swap is skipped and the current content stays in place.
+func (u *UI) fail(c *gin.Context, status int, msg string) {
+	if isHX(c) {
+		c.HTML(status, partialPrefix+"toast_oob", Flash{Kind: "error", Msg: msg})
+		return
+	}
+	p := u.page(c, http.StatusText(status), "", errorView{Status: status, Message: msg})
+	c.HTML(status, "error", p)
+}
+
+type errorView struct {
+	Status  int
+	Message string
+}
+
+// failErr maps common errors to a status and logs unexpected ones.
+func (u *UI) failErr(c *gin.Context, what string, err error) {
+	switch {
+	case errors.Is(err, ops.ErrNotFound), errors.Is(err, sql.ErrNoRows):
+		u.fail(c, http.StatusNotFound, what+" not found. It may have been deleted.")
+	default:
+		u.Log.ErrorContext(c, "ui request failed", "what", what, "err", err)
+		u.fail(c, http.StatusInternalServerError, "Something went wrong loading "+what+". Try again in a moment.")
+	}
+}
+
+// done finishes a successful mutation: htmx requests get a toast (plus any
+// fragment the caller already wrote), plain form posts get a 303 redirect.
+func (u *UI) redirect(c *gin.Context, target, flash string, n int) {
+	q := url.Values{}
+	if flash != "" {
+		q.Set("flash", flash)
+	}
+	if n >= 0 && flash != "" {
+		q.Set("n", strconv.Itoa(n))
+	}
+	if len(q) > 0 {
+		sep := "?"
+		if u, err := url.Parse(target); err == nil && u.RawQuery != "" {
+			sep = "&"
+		}
+		target += sep + q.Encode()
+	}
+	if isHX(c) {
+		c.Header("HX-Redirect", target)
+		c.Status(http.StatusOK)
+		return
+	}
+	c.Redirect(http.StatusSeeOther, target)
+}
+
+// toastFor renders a fragment plus an out-of-band toast for htmx row actions.
+type rowResult struct {
+	Row   any
+	Toast Flash
+}
+
+func pageParam(c *gin.Context) int {
+	p, err := strconv.Atoi(c.Query("page"))
+	if err != nil || p < 1 {
+		return 1
+	}
+	return p
+}
+
+// pager describes offset pagination for templates.
+type pager struct {
+	Page    int
+	HasPrev bool
+	HasNext bool
+	PrevURL string
+	NextURL string
+}
+
+func newPager(base url.Values, path string, page int, hasNext bool) pager {
+	link := func(p int) string {
+		q := url.Values{}
+		for k, v := range base {
+			if len(v) > 0 && v[0] != "" {
+				q.Set(k, v[0])
+			}
+		}
+		if p > 1 {
+			q.Set("page", strconv.Itoa(p))
+		}
+		if len(q) == 0 {
+			return path
+		}
+		return path + "?" + q.Encode()
+	}
+	return pager{Page: page, HasPrev: page > 1, HasNext: hasNext, PrevURL: link(page - 1), NextURL: link(page + 1)}
 }

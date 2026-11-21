@@ -2,7 +2,7 @@
 package server
 
 import (
-	"html/template"
+	"database/sql"
 	"log/slog"
 	"net/http"
 
@@ -16,6 +16,7 @@ import (
 
 // Deps are the shared dependencies route handlers need.
 type Deps struct {
+	DB             *sql.DB
 	Queries        *database.Queries
 	Cache          *cache.RedisSubscriptionCache
 	Logger         *slog.Logger
@@ -30,14 +31,11 @@ func NewRouter(d Deps) (*gin.Engine, error) {
 	}
 	r.Use(gin.Recovery(), middleware.RequestID(), middleware.RequestLogger(d.Logger))
 
-	tmpl, err := template.New("").Funcs(template.FuncMap{
-		"add":      func(a, b int) int { return a + b },
-		"subtract": func(a, b int) int { return a - b },
-	}).ParseFS(web.Templates, "*.html")
+	htmlRender, err := api.NewUIRenderer(web.Templates)
 	if err != nil {
 		return nil, err
 	}
-	r.SetHTMLTemplate(tmpl)
+	r.HTMLRender = htmlRender
 	r.StaticFS("/static", http.FS(web.Static))
 
 	authConfig := middleware.LoadAdminAuthConfig()
@@ -63,10 +61,9 @@ func NewRouter(d Deps) (*gin.Engine, error) {
 
 	// Admin UI.
 	adminUI := r.Group("/")
-	adminUI.Use(middleware.AdminAuthHTML(authConfig))
-	api.RegisterUIRoutesGroup(adminUI, &api.UIHandler{Queries: queries, Cache: subCache})
+	adminUI.Use(middleware.AdminAuthHTML(authConfig), api.UISecurityHeaders())
+	api.RegisterAdminUI(adminUI, api.NewUI(d.DB, subCache, d.Logger))
 	api.RegisterDLQRoutesGroup(adminUI, &api.DLQHandler{Queries: queries})
-	api.RegisterDashboardRoutesGroup(adminUI, &api.DashboardHandler{Queries: queries, Cache: subCache})
 	api.RegisterMetricsRoutesGroup(adminUI, &api.MetricsHandler{Queries: queries})
 	api.RegisterBacklogRoutesGroup(adminUI, &api.BacklogHandler{Queries: queries})
 
