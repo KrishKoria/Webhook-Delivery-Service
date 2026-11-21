@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -156,6 +157,64 @@ func TestRateLimitMiddleware_Returns429(t *testing.T) {
 	if w2.Code != http.StatusTooManyRequests {
 		t.Errorf("Expected second request to return 429, got %d", w2.Code)
 	}
+	if got := w2.Header().Get("Retry-After"); got != "1" {
+		t.Errorf("Retry-After = %q, want \"1\"", got)
+	}
+}
+
+func TestRateLimiter_CapEvictsLeastRecentlyUsed(t *testing.T) {
+	limiter := NewRateLimiter(RateLimitConfig{RequestsPerSecond: 1, BurstSize: 1, Enabled: true, MaxBuckets: 3})
+	limiter.Allow("a")
+	time.Sleep(2 * time.Millisecond)
+	limiter.Allow("b")
+	time.Sleep(2 * time.Millisecond)
+	limiter.Allow("c")
+	time.Sleep(2 * time.Millisecond)
+	limiter.Allow("d") // evicts "a", the least recently used
+
+	if n := limiter.Len(); n != 3 {
+		t.Fatalf("bucket count = %d, want 3", n)
+	}
+	// "b" still exists with an empty bucket, so it is limited.
+	if limiter.Allow("b") {
+		t.Error("expected b to still be rate limited")
+	}
+	// "a" was evicted, so it starts with a fresh bucket.
+	if !limiter.Allow("a") {
+		t.Error("expected evicted key a to get a fresh bucket")
+	}
+}
+
+func TestRateLimiter_SweepEvictsIdleBuckets(t *testing.T) {
+	limiter := NewRateLimiter(RateLimitConfig{RequestsPerSecond: 1, BurstSize: 1, Enabled: true, IdleTTL: time.Minute})
+	limiter.Allow("idle")
+	limiter.Allow("busy")
+
+	if n := limiter.Sweep(time.Now()); n != 0 {
+		t.Fatalf("fresh buckets swept: %d", n)
+	}
+	if n := limiter.Sweep(time.Now().Add(2 * time.Minute)); n != 2 {
+		t.Fatalf("swept %d buckets, want 2", n)
+	}
+	if limiter.Len() != 0 {
+		t.Fatalf("expected no buckets after sweep, got %d", limiter.Len())
+	}
+}
+
+func TestRateLimiter_JanitorStopsWithContext(t *testing.T) {
+	limiter := NewRateLimiter(RateLimitConfig{RequestsPerSecond: 1, BurstSize: 1, Enabled: true, IdleTTL: time.Millisecond})
+	ctx, cancel := context.WithCancel(context.Background())
+	limiter.StartJanitor(ctx, time.Millisecond)
+	limiter.Allow("x")
+
+	deadline := time.Now().Add(2 * time.Second)
+	for limiter.Len() != 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("janitor never evicted the idle bucket")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
 }
 
 func TestRateLimitMiddleware_NoSubscriptionID(t *testing.T) {
