@@ -3,107 +3,140 @@ package api
 import (
 	"crypto/hmac"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
-	"io"
-	"log"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
+	"github.com/KrishKoria/Webhook-Delivery-Service/internal/api/middleware"
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/cache"
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/database"
+	"github.com/KrishKoria/Webhook-Delivery-Service/internal/ops"
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 )
 
+// MaxIdempotencyKeyLen bounds the Idempotency-Key header.
+const MaxIdempotencyKeyLen = 255
+
+// WebhookHandler serves the public ingest endpoint.
 type WebhookHandler struct {
-    Queries *database.Queries
-    Cache   *cache.RedisSubscriptionCache
+	Queries *database.Queries
+	Cache   *cache.RedisSubscriptionCache
+	Ops     *ops.Ops
 }
 
-// RegisterWebhookRoutes registers the webhook ingestion endpoint.
-func RegisterWebhookRoutes(r *gin.Engine, h *WebhookHandler) {
-    r.POST("/ingest/:subscription_id", h.IngestWebhook)
-}
-
-// RegisterWebhookRoutesGroup registers webhook routes on a RouterGroup (for middleware).
+// RegisterWebhookRoutesGroup registers the ingest endpoint.
 func RegisterWebhookRoutesGroup(rg *gin.RouterGroup, h *WebhookHandler) {
-    rg.POST("/ingest/:subscription_id", h.IngestWebhook)
+	rg.POST("/ingest/:subscription_id", h.IngestWebhook)
 }
 
-// IngestWebhook handles incoming webhooks.
+// IngestWebhook accepts a JSON event for a subscription and queues a delivery task.
+//
+//	415 non-JSON Content-Type · 404 unknown subscription · 503 database unavailable
+//	413 body over limit · 400 invalid JSON or Idempotency-Key · 401 bad signature
+//	204 event type not in the subscription's allowlist (dropped, not an error)
+//	202 {task_id} queued · 200 {task_id, duplicate:true} for a repeated Idempotency-Key
+//
+// Paused subscriptions still accept events; the worker defers their delivery.
 func (h *WebhookHandler) IngestWebhook(c *gin.Context) {
-    subID := c.Param("subscription_id")
-    eventType := c.GetHeader("X-Event-Type")
-    var sub database.Subscription
-    var ok bool
-    var err error
-    if h.Cache != nil { 
-        sub, ok = h.Cache.Get(subID)
-    }
-    if !ok {
-        sub, err = h.Queries.GetSubscription(c, subID)
-        if err != nil {
-            log.Printf("Error fetching subscription %s from DB: %v", subID, err)
-            RespondNotFound(c, "subscription")
-            return
-        }
-        if h.Cache != nil { 
-            h.Cache.Set(subID, sub)
-        }
-    }
-    body, err := io.ReadAll(c.Request.Body)
-    if err != nil {
-        RespondError(c, http.StatusBadRequest, "invalid request body", ErrCodeBadRequest)
-        return
-    }
-    defer c.Request.Body.Close()
+	if !middleware.IsJSONContentType(c.GetHeader("Content-Type")) {
+		RespondError(c, http.StatusUnsupportedMediaType, "Content-Type must be application/json", ErrCodeUnsupportedMedia)
+		return
+	}
+	idemKey := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+	if len(idemKey) > MaxIdempotencyKeyLen {
+		RespondErrorWithField(c, http.StatusBadRequest, "Idempotency-Key must be at most 255 characters", "Idempotency-Key")
+		return
+	}
 
-    // Event allowlist check - returns 204 No Content if not allowed (not an error)
-    if !subscriptionAllowsEvent(sub, eventType) {
-        c.Status(http.StatusNoContent)
-        return
-    }
+	subID := c.Param("subscription_id")
+	sub, err := h.subscription(c, subID)
+	if errors.Is(err, sql.ErrNoRows) {
+		RespondNotFound(c, "subscription")
+		return
+	}
+	if err != nil {
+		respondUnavailable(c, "ingest: load subscription", err)
+		return
+	}
 
-    // Signature verification for subscriptions with secrets configured
-    if sub.Secret.Valid && sub.Secret.String != "" {
-        sig := c.GetHeader("X-Hub-Signature-256")
-        if !verifySignature(body, sub.Secret.String, sig) {
-            RespondUnauthorized(c, "invalid signature")
-            return
-        }
-    }
+	body, ok := readBody(c)
+	if !ok {
+		return
+	}
+	if !json.Valid(body) {
+		RespondValidationError(c, "request body must be valid JSON")
+		return
+	}
 
-    taskID := uuid.New().String()
-    err = h.Queries.CreateDeliveryTask(c, database.CreateDeliveryTaskParams{
-        ID:             taskID,
-        SubscriptionID: subID,
-        Payload:        string(body),
-    })
-    if err != nil {
-        log.Printf("Error creating delivery task for subscription %s: %v", subID, err)
-        RespondInternalError(c)
-        return
-    }
+	// Authenticate before revealing anything about the subscription's configuration
+	// (such as which event types it accepts).
+	if sub.Secret.Valid && sub.Secret.String != "" &&
+		!verifySignature(body, sub.Secret.String, c.GetHeader("X-Hub-Signature-256")) {
+		RespondUnauthorized(c, "invalid signature")
+		return
+	}
 
-    c.Status(http.StatusAccepted)
+	eventType := strings.TrimSpace(c.GetHeader("X-Event-Type"))
+	if !subscriptionAllowsEvent(sub, eventType) {
+		c.Status(http.StatusNoContent)
+		return
+	}
+
+	taskID, duplicate, err := h.Ops.Enqueue(c.Request.Context(), ops.EnqueueInput{
+		SubscriptionID: sub.ID,
+		Payload:        string(body),
+		EventType:      eventType,
+		IdempotencyKey: idemKey,
+	})
+	if err != nil {
+		respondUnavailable(c, "ingest: enqueue task", err)
+		return
+	}
+	if duplicate {
+		RespondSuccess(c, http.StatusOK, gin.H{"task_id": taskID, "duplicate": true})
+		return
+	}
+	RespondSuccess(c, http.StatusAccepted, gin.H{"task_id": taskID})
 }
 
+// subscription loads a subscription through the cache when one is configured.
+func (h *WebhookHandler) subscription(c *gin.Context, id string) (database.Subscription, error) {
+	if h.Cache != nil {
+		if sub, ok := h.Cache.Get(id); ok {
+			return sub, nil
+		}
+	}
+	sub, err := h.Queries.GetSubscription(c.Request.Context(), id)
+	if err != nil {
+		return database.Subscription{}, err
+	}
+	if h.Cache != nil {
+		h.Cache.Set(id, sub)
+	}
+	return sub, nil
+}
+
+// verifySignature checks an inbound "sha256=<hex HMAC-SHA256(secret, body)>" header in constant time.
 func verifySignature(body []byte, secret, signature string) bool {
-    mac := hmac.New(sha256.New, []byte(secret))
-    mac.Write(body)
-    expected := "sha256=" + hex.EncodeToString(mac.Sum(nil))
-    return hmac.Equal([]byte(expected), []byte(signature))
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	expected := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+	return hmac.Equal([]byte(expected), []byte(signature))
 }
 
+// subscriptionAllowsEvent reports whether eventType passes the subscription's allowlist.
+// No allowlist, or no event type on the request, means everything passes.
 func subscriptionAllowsEvent(sub database.Subscription, eventType string) bool {
-    if sub.EventTypes.Valid && sub.EventTypes.String != "" && eventType != "" {
-        allowed := strings.Split(sub.EventTypes.String, ",")
-        for _, et := range allowed {
-            if strings.TrimSpace(et) == eventType {
-                return true
-            }
-        }
-        return false
-    }
-    return true
+	if !sub.EventTypes.Valid || strings.TrimSpace(sub.EventTypes.String) == "" || eventType == "" {
+		return true
+	}
+	for et := range strings.SplitSeq(sub.EventTypes.String, ",") {
+		if strings.TrimSpace(et) == eventType {
+			return true
+		}
+	}
+	return false
 }
