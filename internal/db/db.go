@@ -48,9 +48,8 @@ func Open(ctx context.Context, cfg Config) (*sql.DB, goose.Dialect, error) {
 			if strings.Contains(dsn, "?") {
 				sep = "&"
 			}
-			// Foreign keys stay off (SQLite's default) to match the remote engine;
-			// the application deletes dependent rows explicitly.
-			dsn += sep + "_pragma=busy_timeout(5000)"
+			// Turso enforces foreign keys, so local databases and tests do too.
+			dsn += sep + "_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
 		}
 		var err error
 		conn, err = sql.Open("sqlite", dsn)
