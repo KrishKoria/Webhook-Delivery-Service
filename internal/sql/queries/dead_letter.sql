@@ -2,7 +2,7 @@
 INSERT INTO dead_letter_tasks (
     id, original_task_id, subscription_id, payload, failed_at, reason, last_attempt_at, attempt_count, status, target_url, event_type, error_details
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?
 );
 
 -- name: ListDeadLetterTasksForSubscription :many
@@ -19,7 +19,7 @@ WHERE id = ?;
 
 -- name: UpdateDeadLetterTaskStatus :exec
 UPDATE dead_letter_tasks
-SET status = ?, last_attempt_at = ?, attempt_count = attempt_count + 1, error_details = ?
+SET status = ?, last_attempt_at = CURRENT_TIMESTAMP, attempt_count = attempt_count + 1, error_details = ?
 WHERE id = ?;
 
 -- name: DeleteDeadLetterTask :exec
@@ -58,7 +58,7 @@ FROM dead_letter_tasks;
 
 -- name: PurgeRetriedDLQTasks :exec
 DELETE FROM dead_letter_tasks
-WHERE status = 'retried' AND last_attempt_at < ?;
+WHERE status = 'retried' AND last_attempt_at < datetime('now', '-' || CAST(sqlc.arg(older_than_days) AS INTEGER) || ' days');
 
 -- name: BulkDeleteDLQTasks :exec
 DELETE FROM dead_letter_tasks

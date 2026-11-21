@@ -6,32 +6,5 @@ sql:
     gen:
       go:
         out: "internal/database"
-        overrides:
-          # Override time.Time columns to use our custom LibSQLTime type
-          # which handles string timestamps from libsql-client-go
-          - column: "delivery_tasks.created_at"
-            go_type: "github.com/KrishKoria/Webhook-Delivery-Service/internal/types.LibSQLTime"
-          - column: "delivery_tasks.last_attempt_at"
-            go_type: "github.com/KrishKoria/Webhook-Delivery-Service/internal/types.LibSQLNullTime"
-          - column: "delivery_tasks.next_attempt_at"
-            go_type: "github.com/KrishKoria/Webhook-Delivery-Service/internal/types.LibSQLNullTime"
-          - column: "delivery_tasks.claimed_at"
-            go_type: "github.com/KrishKoria/Webhook-Delivery-Service/internal/types.LibSQLNullTime"
-          - column: "delivery_tasks.lease_until"
-            go_type: "github.com/KrishKoria/Webhook-Delivery-Service/internal/types.LibSQLNullTime"
-          - column: "delivery_logs.timestamp"
-            go_type: "github.com/KrishKoria/Webhook-Delivery-Service/internal/types.LibSQLTime"
-          - column: "subscriptions.created_at"
-            go_type: "github.com/KrishKoria/Webhook-Delivery-Service/internal/types.LibSQLTime"
-          - column: "subscriptions.updated_at"
-            go_type: "github.com/KrishKoria/Webhook-Delivery-Service/internal/types.LibSQLTime"
-          - column: "dead_letter_tasks.failed_at"
-            go_type: "github.com/KrishKoria/Webhook-Delivery-Service/internal/types.LibSQLTime"
-          - column: "dead_letter_tasks.last_attempt_at"
-            go_type: "github.com/KrishKoria/Webhook-Delivery-Service/internal/types.LibSQLNullTime"
-          - column: "scheduled_webhooks.scheduled_for"
-            go_type: "github.com/KrishKoria/Webhook-Delivery-Service/internal/types.LibSQLTime"
-          - column: "scheduled_webhooks.created_at"
-            go_type: "github.com/KrishKoria/Webhook-Delivery-Service/internal/types.LibSQLTime"
-          - column: "scheduled_webhooks.updated_at"
-            go_type: "github.com/KrishKoria/Webhook-Delivery-Service/internal/types.LibSQLTime"
+        # tursogo-serverless and modernc.org/sqlite both scan DATETIME columns
+        # into time.Time, so no custom timestamp types are needed.

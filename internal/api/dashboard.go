@@ -227,7 +227,7 @@ func (h *DashboardHandler) BacklogPage(c *gin.Context) {
 			SubscriptionURL: task.SubscriptionUrl,
 			Status:          task.Status,
 			AttemptCount:    task.AttemptCount,
-			CreatedAt:       task.CreatedAt.ToTime(),
+			CreatedAt:       task.CreatedAt,
 		}
 		if task.ClaimedBy.Valid {
 			activeResponse[i].ClaimedBy = &task.ClaimedBy.String
@@ -248,7 +248,7 @@ func (h *DashboardHandler) BacklogPage(c *gin.Context) {
 			SubscriptionURL: task.SubscriptionUrl,
 			Status:          task.Status,
 			AttemptCount:    task.AttemptCount,
-			CreatedAt:       task.CreatedAt.ToTime(),
+			CreatedAt:       task.CreatedAt,
 		}
 		if task.NextAttemptAt.Valid {
 			t := task.NextAttemptAt.Time

@@ -2,7 +2,9 @@
 INSERT INTO scheduled_webhooks (
     id, subscription_id, payload, scheduled_for, recurrence, status
 ) VALUES (
-    ?, ?, ?, ?, ?, 'pending'
+    sqlc.arg(id), sqlc.arg(subscription_id), sqlc.arg(payload),
+    -- datetime() normalizes any RFC3339 input (including offsets) to canonical UTC.
+    datetime(sqlc.arg(scheduled_for)), sqlc.arg(recurrence), 'pending'
 );
 
 -- name: GetScheduledWebhook :one
@@ -17,7 +19,7 @@ LIMIT ? OFFSET ?;
 
 -- name: GetDueScheduledWebhooks :many
 SELECT * FROM scheduled_webhooks
-WHERE scheduled_for <= ? AND status = 'pending';
+WHERE scheduled_for <= CURRENT_TIMESTAMP AND status = 'pending';
 
 -- name: UpdateScheduledWebhookStatus :exec
 UPDATE scheduled_webhooks
