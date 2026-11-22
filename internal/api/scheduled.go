@@ -25,13 +25,6 @@ func RegisterScheduledRoutesGroup(rg *gin.RouterGroup, h *ScheduledHandler) {
 	rg.POST("/api/scheduled/:id/cancel", h.CancelScheduledAPI)
 }
 
-// RegisterScheduledFormRoutesGroup registers the legacy HTML form endpoint
-// (POST /scheduled), used by the current new_scheduled.html template. It belongs
-// on the UI group. Remove it once the admin UI posts to its own /ui/... route.
-func RegisterScheduledFormRoutesGroup(rg *gin.RouterGroup, h *ScheduledHandler) {
-	rg.POST("/scheduled", h.CreateScheduled)
-}
-
 var validRecurrences = map[string]bool{"": true, "none": true, "daily": true, "weekly": true, "monthly": true}
 
 // CreateScheduledRequest is the body of POST /api/scheduled.
@@ -119,20 +112,6 @@ func (h *ScheduledHandler) insertSchedule(c *gin.Context, req CreateScheduledReq
 		return ""
 	}
 	return id
-}
-
-// CreateScheduled handles the legacy form POST /scheduled and redirects to the UI.
-func (h *ScheduledHandler) CreateScheduled(c *gin.Context) {
-	req := CreateScheduledRequest{
-		SubscriptionID: c.PostForm("subscription_id"),
-		Payload:        c.PostForm("payload"),
-		ScheduledFor:   c.PostForm("scheduled_for"),
-		Recurrence:     c.PostForm("recurrence"),
-	}
-	if h.insertSchedule(c, req) == "" {
-		return
-	}
-	c.Redirect(http.StatusSeeOther, "/ui/subscriptions/"+req.SubscriptionID+"/scheduled/list")
 }
 
 // CreateScheduledAPI handles POST /api/scheduled.

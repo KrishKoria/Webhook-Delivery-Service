@@ -23,6 +23,8 @@ type UI struct {
 	Ops   *ops.Ops
 	Cache *cache.RedisSubscriptionCache
 	Log   *slog.Logger
+	// AllowPrivateTargets skips the SSRF check on target URLs (WEBHOOK_ALLOW_PRIVATE_IPS, local dev only).
+	AllowPrivateTargets bool
 }
 
 // NewUI builds the admin UI handlers on conn.
@@ -80,7 +82,7 @@ func RegisterAdminUI(rg *gin.RouterGroup, u *UI) {
 }
 
 // Page is the data every full page receives; Data holds the page-specific view.
-type Page struct {
+type ViewPage struct {
 	Title    string
 	Nav      string // which primary nav item is current
 	Flash    *Flash
@@ -130,13 +132,13 @@ func flashFromQuery(c *gin.Context) *Flash {
 	return &f
 }
 
-func (u *UI) page(c *gin.Context, title, nav string, data any) *Page {
-	return &Page{Title: title, Nav: nav, Flash: flashFromQuery(c), Now: time.Now().UTC(), Data: data}
+func (u *UI) page(c *gin.Context, title, nav string, data any) *ViewPage {
+	return &ViewPage{Title: title, Nav: nav, Flash: flashFromQuery(c), Now: time.Now().UTC(), Data: data}
 }
 
 // degrade records a failed read so the page can show a banner instead of
 // silently rendering zeros.
-func (u *UI) degrade(c *gin.Context, p *Page, what string, err error) {
+func (u *UI) degrade(c *gin.Context, p *ViewPage, what string, err error) {
 	if err == nil {
 		return
 	}
@@ -148,7 +150,7 @@ func (u *UI) degrade(c *gin.Context, p *Page, what string, err error) {
 func isHX(c *gin.Context) bool { return c.GetHeader("HX-Request") == "true" }
 
 // show renders the full page, or only the named fragment for htmx requests.
-func (u *UI) show(c *gin.Context, page, fragment string, p *Page) {
+func (u *UI) show(c *gin.Context, page, fragment string, p *ViewPage) {
 	if fragment != "" && isHX(c) {
 		c.HTML(http.StatusOK, partialPrefix+fragment, p)
 		return
@@ -224,11 +226,11 @@ func pageParam(c *gin.Context) int {
 
 // pager describes offset pagination for templates.
 type pager struct {
-	Page    int
-	HasPrev bool
-	HasNext bool
-	PrevURL string
-	NextURL string
+	ViewPage int
+	HasPrev  bool
+	HasNext  bool
+	PrevURL  string
+	NextURL  string
 }
 
 func newPager(base url.Values, path string, page int, hasNext bool) pager {
@@ -247,5 +249,5 @@ func newPager(base url.Values, path string, page int, hasNext bool) pager {
 		}
 		return path + "?" + q.Encode()
 	}
-	return pager{Page: page, HasPrev: page > 1, HasNext: hasNext, PrevURL: link(page - 1), NextURL: link(page + 1)}
+	return pager{ViewPage: page, HasPrev: page > 1, HasNext: hasNext, PrevURL: link(page - 1), NextURL: link(page + 1)}
 }

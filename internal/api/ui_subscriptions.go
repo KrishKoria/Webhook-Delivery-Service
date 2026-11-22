@@ -3,6 +3,7 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"github.com/KrishKoria/Webhook-Delivery-Service/internal/delivery"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -75,13 +76,13 @@ type subForm struct {
 	Errors      map[string]string
 }
 
-func (f *subForm) bind(c *gin.Context) (secret string) {
+func (f *subForm) bind(c *gin.Context, allowPrivate bool) (secret string) {
 	f.TargetURL = strings.TrimSpace(c.PostForm("target_url"))
 	f.EventTypes = normalizeEventTypes(c.PostForm("event_types"))
 	f.ClearSecret = c.PostForm("clear_secret") == "on"
 	secret = c.PostForm("secret")
 	f.Errors = map[string]string{}
-	if msg := uiCheckTargetURL(f.TargetURL); msg != "" {
+	if msg := uiCheckTargetURL(f.TargetURL, allowPrivate); msg != "" {
 		f.Errors["target_url"] = msg
 	}
 	if strings.TrimSpace(secret) != secret {
@@ -93,7 +94,9 @@ func (f *subForm) bind(c *gin.Context) (secret string) {
 	return secret
 }
 
-func uiCheckTargetURL(raw string) string {
+// uiCheckTargetURL returns a user-facing message when raw is not a usable
+// target: malformed, or (unless allowPrivate) resolving to a private address.
+func uiCheckTargetURL(raw string, allowPrivate bool) string {
 	if raw == "" {
 		return "Enter the URL that should receive webhooks."
 	}
@@ -101,22 +104,16 @@ func uiCheckTargetURL(raw string) string {
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return "Use a full http:// or https:// URL, for example https://example.com/hooks."
 	}
+	if !allowPrivate {
+		if err := delivery.ValidateTargetURL(raw); err != nil {
+			return "This address points to a private or internal network. Use a public URL."
+		}
+	}
 	return ""
 }
 
-// normalizeEventTypes turns "a, b ,,c" into "a,b,c".
-func normalizeEventTypes(raw string) string {
-	var out []string
-	for t := range strings.SplitSeq(raw, ",") {
-		if t = strings.TrimSpace(t); t != "" {
-			out = append(out, t)
-		}
-	}
-	return strings.Join(out, ",")
-}
-
 // showForm renders a form page, or just the form fragment for htmx (422 swaps it in place).
-func (u *UI) showForm(c *gin.Context, status int, page, fragment string, p *Page) {
+func (u *UI) showForm(c *gin.Context, status int, page, fragment string, p *ViewPage) {
 	if isHX(c) {
 		c.HTML(status, partialPrefix+fragment, p)
 		return
@@ -133,7 +130,7 @@ func (u *UI) NewSubscription(c *gin.Context) {
 // CreateSubscription handles POST /ui/subscriptions.
 func (u *UI) CreateSubscription(c *gin.Context) {
 	f := subForm{Action: "/ui/subscriptions"}
-	secret := f.bind(c)
+	secret := f.bind(c, u.AllowPrivateTargets)
 	if len(f.Errors) > 0 {
 		u.showForm(c, http.StatusUnprocessableEntity, "subscription_form", "sub_form",
 			u.page(c, "New subscription", "subscriptions", &f))
@@ -177,7 +174,7 @@ func (u *UI) UpdateSubscription(c *gin.Context) {
 		subCtx: subCtx{Sub: sub, Tab: "settings"}, Editing: true,
 		Action: "/ui/subscriptions/" + sub.ID + "/edit", HasSecret: sub.Secret.Valid && sub.Secret.String != "",
 	}
-	secret := f.bind(c)
+	secret := f.bind(c, u.AllowPrivateTargets)
 	if len(f.Errors) > 0 {
 		u.showForm(c, http.StatusUnprocessableEntity, "subscription_form", "sub_form", u.page(c, "Settings", "subscriptions", &f))
 		return
@@ -253,7 +250,7 @@ type testForm struct {
 	Errors    map[string]string
 }
 
-const defaultTestPayload = "{\n  \"event\": \"test\",\n  \"source\": \"admin_ui\"\n}"
+const uiTestPayload = "{\n  \"event\": \"test\",\n  \"source\": \"admin_ui\"\n}"
 
 // TestForm handles GET /ui/subscriptions/:id/test.
 func (u *UI) TestForm(c *gin.Context) {
@@ -261,7 +258,7 @@ func (u *UI) TestForm(c *gin.Context) {
 	if !ok {
 		return
 	}
-	f := testForm{subCtx: subCtx{Sub: sub, Tab: "test"}, EventType: firstEventType(sub), Payload: defaultTestPayload}
+	f := testForm{subCtx: subCtx{Sub: sub, Tab: "test"}, EventType: firstEventType(sub), Payload: uiTestPayload}
 	c.HTML(http.StatusOK, "send_test", u.page(c, "Send test", "subscriptions", &f))
 }
 

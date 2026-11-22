@@ -23,6 +23,9 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// version is set at build time: -ldflags "-X main.version=1.2.3".
+var version = "dev"
+
 func main() {
 	_ = godotenv.Load()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel()}))
@@ -79,6 +82,9 @@ func run(ctx context.Context, logger *slog.Logger) error {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	router, err := server.NewRouter(server.Deps{
+		Context:        ctx,
+		Version:        version,
+		StartTime:      time.Now(),
 		DB:             db.DB,
 		Queries:        queries,
 		Cache:          subCache,
