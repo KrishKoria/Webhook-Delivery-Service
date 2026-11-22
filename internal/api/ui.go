@@ -81,7 +81,7 @@ func RegisterAdminUI(rg *gin.RouterGroup, u *UI) {
 	rg.POST("/ui/scheduled/:id/delete", u.DeleteScheduled)
 }
 
-// Page is the data every full page receives; Data holds the page-specific view.
+// ViewPage is the data every full page receives; Data holds the page-specific view.
 type ViewPage struct {
 	Title    string
 	Nav      string // which primary nav item is current
@@ -90,6 +90,9 @@ type ViewPage struct {
 	Live     bool     // the page polls; show the live status and pause toggle
 	Now      time.Time
 	Data     any
+	// Fragment is set when only a partial is rendered (htmx request), so
+	// polled regions can add out-of-band updates a full page must not repeat.
+	Fragment bool
 }
 
 // Flash is a one-off status message.
@@ -152,6 +155,7 @@ func isHX(c *gin.Context) bool { return c.GetHeader("HX-Request") == "true" }
 // show renders the full page, or only the named fragment for htmx requests.
 func (u *UI) show(c *gin.Context, page, fragment string, p *ViewPage) {
 	if fragment != "" && isHX(c) {
+		p.Fragment = true
 		c.HTML(http.StatusOK, partialPrefix+fragment, p)
 		return
 	}
@@ -226,11 +230,11 @@ func pageParam(c *gin.Context) int {
 
 // pager describes offset pagination for templates.
 type pager struct {
-	ViewPage int
-	HasPrev  bool
-	HasNext  bool
-	PrevURL  string
-	NextURL  string
+	Page    int
+	HasPrev bool
+	HasNext bool
+	PrevURL string
+	NextURL string
 }
 
 func newPager(base url.Values, path string, page int, hasNext bool) pager {
@@ -249,5 +253,5 @@ func newPager(base url.Values, path string, page int, hasNext bool) pager {
 		}
 		return path + "?" + q.Encode()
 	}
-	return pager{ViewPage: page, HasPrev: page > 1, HasNext: hasNext, PrevURL: link(page - 1), NextURL: link(page + 1)}
+	return pager{Page: page, HasPrev: page > 1, HasNext: hasNext, PrevURL: link(page - 1), NextURL: link(page + 1)}
 }

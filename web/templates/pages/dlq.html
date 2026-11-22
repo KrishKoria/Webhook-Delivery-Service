@@ -1,0 +1,42 @@
+{{define "content"}}
+{{with .Data}}
+<header class="page-head">
+  <h1>Dead letter queue</h1>
+  <p class="lede">Deliveries that ran out of attempts, got a 410 Gone, or lost their subscription. Retry moves an entry back into the delivery queue as a new task.</p>
+</header>
+<div class="toolbar">
+  <nav class="segmented" aria-label="Status">
+    <a href="/ui/dlq{{with .Subscription}}?subscription={{.}}{{end}}"{{if eq .Status ""}} aria-current="true"{{end}}>All</a>
+    <a href="/ui/dlq?status=dead{{with .Subscription}}&amp;subscription={{.}}{{end}}"{{if eq .Status "dead"}} aria-current="true"{{end}}>Dead ({{.Counts.Dead}})</a>
+    <a href="/ui/dlq?status=retried{{with .Subscription}}&amp;subscription={{.}}{{end}}"{{if eq .Status "retried"}} aria-current="true"{{end}}>Retried ({{.Counts.Retried}})</a>
+  </nav>
+  {{with .Subscription}}<span class="chip">Subscription <span class="mono">{{short .}}</span><a href="/ui/dlq{{with $.Data.Status}}?status={{.}}{{end}}" aria-label="Show entries for every subscription">×</a></span>{{end}}
+</div>
+{{if .Rows}}
+<form method="post" action="/ui/dlq/bulk-retry" id="dlq-bulk">
+  <input type="hidden" name="return" value="{{.Return}}">
+  <div class="toolbar">
+    <label class="checkbox"><input type="checkbox" data-select-all> Select all on this page</label>
+    <span class="toolbar__count" data-selected-count aria-live="polite"></span>
+    <span class="toolbar__spacer"></span>
+    <button class="btn btn--sm" type="submit" data-bulk>Retry selected</button>
+    <button class="btn btn--sm btn--danger" type="submit" formaction="/ui/dlq/bulk-delete" data-bulk data-confirm="Delete the selected entries? Their payloads are gone for good.">Delete selected</button>
+  </div>
+  <div class="table-wrap"><table class="table">
+    <caption class="sr-only">Dead letter entries, newest first</caption>
+    <thead><tr>
+      <th scope="col" class="check"><span class="sr-only">Select</span></th><th scope="col">Failed</th><th scope="col">Target</th>
+      <th scope="col" class="num">Attempts</th><th scope="col">Reason</th><th scope="col">Status</th><th scope="col"><span class="sr-only">Actions</span></th>
+    </tr></thead>
+    <tbody>{{range .Rows}}{{template "dlq_row" dict "Entry" . "Return" $.Data.Return}}{{end}}</tbody>
+  </table></div>
+</form>
+{{template "pager" .Pager}}
+{{else}}
+<div class="empty">
+  <strong>{{if or .Status .Subscription}}No entries match this filter.{{else}}The dead letter queue is empty.{{end}}</strong>
+  {{if or .Status .Subscription}}<a href="/ui/dlq">Show every entry</a>{{else}}<span>Every task so far was delivered or is still being retried.</span>{{end}}
+</div>
+{{end}}
+{{end}}
+{{end}}

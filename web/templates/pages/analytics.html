@@ -1,0 +1,56 @@
+{{define "content"}}
+{{template "sub_header" .Data}}
+{{with .Data}}
+<div class="toolbar">
+  <nav class="segmented" aria-label="Time window">{{range .Windows}}<a href="{{.URL}}"{{if .Active}} aria-current="true"{{end}}>{{.Label}}</a>{{end}}</nav>
+</div>
+
+{{if eq .Total 0}}
+<section class="verdict" aria-labelledby="a-verdict">
+  <h2 class="verdict__title" id="a-verdict">No delivery attempts in the last {{.WindowLabel}}</h2>
+  <p class="verdict__detail"><a href="/ui/subscriptions/{{.Sub.ID}}/test">Send a test event</a> to start collecting numbers.</p>
+</section>
+{{else}}
+<section class="verdict verdict--{{if ge .SuccessRate 99.0}}ok{{else if ge .SuccessRate 90.0}}warn{{else}}bad{{end}}" aria-labelledby="a-verdict">
+  <h2 class="verdict__title" id="a-verdict">{{printf "%.1f" .SuccessRate}}% of attempts succeeded in the last {{.WindowLabel}}</h2>
+  <div class="meter" role="img" aria-label="{{printf "%.1f" .SuccessRate}} percent success"><span class="meter__fill {{rateClass .SuccessRate .Total}} {{widthClass (pct .Attempts.Successful .Total)}}"></span></div>
+  <p class="verdict__detail">{{.Attempts.Successful}} succeeded and {{.Attempts.Failed}} failed out of {{.Total}}. Successful deliveries took {{printf "%.2f" .Attempts.AvgAttemptsToSuccess}} attempts on average. Last attempt {{timeTag .Attempts.LastAttemptAt}}.</p>
+</section>
+{{end}}
+
+<div class="ledger">
+  <section class="ledger__group" aria-labelledby="a-tasks">
+    <div class="ledger__head"><h2 id="a-tasks">Tasks, all time</h2><a href="/ui/subscriptions/{{.Sub.ID}}/logs">Activity</a></div>
+    <dl class="ledger__rows">
+      <div class="ledger__row"><dt>Waiting</dt><dd>{{.Tasks.Pending}}</dd></div>
+      <div class="ledger__row"><dt>In flight</dt><dd>{{.Tasks.InFlight}}</dd></div>
+      <div class="ledger__row"><dt>Delivered</dt><dd><a href="/ui/subscriptions/{{.Sub.ID}}/logs?status=delivered">{{.Tasks.Delivered}}</a></dd></div>
+      <div class="ledger__row{{if gt .Tasks.Failed 0}} ledger__row--alert{{end}}"><dt>Failed</dt><dd><a href="/ui/subscriptions/{{.Sub.ID}}/logs?status=failed">{{.Tasks.Failed}}</a></dd></div>
+    </dl>
+  </section>
+  <section class="ledger__group" aria-labelledby="a-dlq">
+    <div class="ledger__head"><h2 id="a-dlq">Dead letters</h2><a href="/ui/dlq?subscription={{.Sub.ID}}">Open</a></div>
+    <dl class="ledger__rows">
+      <div class="ledger__row{{if gt .DLQ.Dead 0}} ledger__row--alert{{end}}"><dt>Dead</dt><dd><a href="/ui/dlq?subscription={{.Sub.ID}}&amp;status=dead">{{.DLQ.Dead}}</a></dd></div>
+      <div class="ledger__row"><dt>Retried</dt><dd><a href="/ui/dlq?subscription={{.Sub.ID}}&amp;status=retried">{{.DLQ.Retried}}</a></dd></div>
+    </dl>
+  </section>
+</div>
+
+<section class="section" aria-labelledby="a-fail">
+  <div class="section__head"><h2 id="a-fail">Recent failed attempts</h2><p class="section__note">Latest 15</p></div>
+  {{if .Failures}}
+  <div class="table-wrap"><table class="table">
+    <thead><tr><th scope="col">Time</th><th scope="col" class="num">Attempt</th><th scope="col">HTTP</th><th scope="col">Task</th><th scope="col">Error</th></tr></thead>
+    <tbody>{{range .Failures}}<tr>
+      <td class="nowrap">{{timeTag .Timestamp}}</td>
+      <td class="num">{{.AttemptNumber}}</td>
+      <td><span class="{{httpClass .HttpStatus}}">{{if .HttpStatus.Valid}}{{.HttpStatus.Int64}}{{else}}none{{end}}</span></td>
+      <td class="mono" title="{{.DeliveryTaskID}}">{{short .DeliveryTaskID}}</td>
+      <td>{{with .ErrorDetails.String}}<details class="detail"><summary><span class="truncate">{{.}}</span></summary><pre class="code-block">{{.}}</pre></details>{{else}}<span class="muted">none recorded</span>{{end}}</td>
+    </tr>{{end}}</tbody>
+  </table></div>
+  {{else}}<p class="muted">No failed attempts. Every delivery so far has landed.</p>{{end}}
+</section>
+{{end}}
+{{end}}

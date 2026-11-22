@@ -1,0 +1,30 @@
+{{define "content"}}
+{{with .Data}}
+{{if .Global}}
+<header class="page-head">
+  <h1>Scheduled webhooks</h1>
+  <p class="lede">{{.Counts.Pending}} pending, {{.Counts.Enqueued}} enqueued{{if .Counts.Failed}}, {{.Counts.Failed}} failed to enqueue{{end}}. Create schedules from a subscription's Scheduled tab.</p>
+</header>
+{{else}}
+{{template "sub_header" .}}
+<div class="toolbar"><span class="toolbar__spacer"></span><a class="btn btn--primary btn--sm" href="/ui/subscriptions/{{.Sub.ID}}/scheduled/new">Schedule a webhook</a></div>
+{{end}}
+{{if .Rows}}
+<div class="table-wrap"><table class="table">
+  <caption class="sr-only">Scheduled webhooks</caption>
+  <thead><tr>
+    <th scope="col">Fires at</th><th scope="col">Repeats</th><th scope="col">Status</th>{{if .Global}}<th scope="col">Subscription</th>{{end}}
+    <th scope="col">Payload</th><th scope="col"><span class="sr-only">Actions</span></th>
+  </tr></thead>
+  <tbody>{{range .Rows}}{{template "sched_row" dict "Row" . "Global" $.Data.Global "Return" $.Data.Return}}{{end}}</tbody>
+</table></div>
+{{template "pager" .Pager}}
+{{else}}
+<div class="empty">
+  <strong>Nothing is scheduled.</strong>
+  {{if .Global}}<span>Open a subscription and use its Scheduled tab to send a webhook later or on a repeat.</span><a href="/ui/subscriptions">Go to subscriptions</a>
+  {{else}}<span>Send a webhook at a set time, once or on a daily, weekly or monthly repeat.</span><a class="btn btn--primary" href="/ui/subscriptions/{{.Sub.ID}}/scheduled/new">Schedule a webhook</a>{{end}}
+</div>
+{{end}}
+{{end}}
+{{end}}

@@ -3,7 +3,6 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
-	"github.com/KrishKoria/Webhook-Delivery-Service/internal/delivery"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/database"
+	"github.com/KrishKoria/Webhook-Delivery-Service/internal/delivery"
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/ops"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"

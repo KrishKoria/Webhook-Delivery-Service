@@ -1,0 +1,93 @@
+{{/* Subscription list rows and forms. */}}
+
+{{define "sub_item"}}<tr id="sub-{{.ID}}">
+  <td class="cell-url"><a href="/ui/subscriptions/{{.ID}}/logs">{{.TargetUrl}}</a><span class="cell-sub">{{.ID}}</span></td>
+  <td>{{if .EventTypes.String}}<span class="mono truncate">{{.EventTypes.String}}</span>{{else}}<span class="muted">all events</span>{{end}}</td>
+  <td>{{if .Secret.String}}<span class="badge badge--ok">signed</span>{{else}}<span class="badge">unsigned</span>{{end}}</td>
+  <td>{{if .Paused}}{{badge "subscription" "paused"}}{{else}}{{badge "subscription" "active"}}{{end}}</td>
+  <td class="nowrap">{{timeTag .CreatedAt}}</td>
+  <td class="actions">
+    <form class="inline-form" method="post" action="/ui/subscriptions/{{.ID}}/{{if .Paused}}resume{{else}}pause{{end}}"
+          hx-post="/ui/subscriptions/{{.ID}}/{{if .Paused}}resume{{else}}pause{{end}}" hx-target="closest tr" hx-swap="outerHTML">
+      <input type="hidden" name="return" value="list">
+      <button class="btn btn--sm" type="submit">{{if .Paused}}Resume{{else}}Pause{{end}}</button>
+    </form>
+    <details class="menu">
+      <summary class="btn btn--sm btn--ghost" aria-label="More actions for {{.TargetUrl}}">More</summary>
+      <div class="menu__panel">
+        <a class="menu__item" href="/ui/subscriptions/{{.ID}}/test">Send test event</a>
+        <a class="menu__item" href="/ui/subscriptions/{{.ID}}/scheduled/new">Schedule a webhook</a>
+        <a class="menu__item" href="/ui/subscriptions/{{.ID}}/analytics">Analytics</a>
+        <a class="menu__item" href="/ui/subscriptions/{{.ID}}/edit">Settings</a>
+        <div class="menu__sep" role="separator"></div>
+        <form method="post" action="/ui/subscriptions/{{.ID}}/delete"
+              hx-post="/ui/subscriptions/{{.ID}}/delete" hx-target="closest tr" hx-swap="delete"
+              hx-confirm="Delete this subscription? Its delivery logs, queued tasks and schedules are deleted too.">
+          <input type="hidden" name="return" value="list">
+          <button class="menu__item menu__item--danger" type="submit">Delete subscription</button>
+        </form>
+      </div>
+    </details>
+  </td>
+</tr>{{end}}
+
+{{define "sub_item_result"}}{{template "sub_item" .Row}}{{template "toast_oob" .Toast}}{{end}}
+
+{{define "sub_form"}}{{with .Data}}<form id="sub-form" class="form" method="post" action="{{.Action}}" hx-post="{{.Action}}" hx-swap="outerHTML" novalidate>
+  {{template "form_summary" .Errors}}
+
+  <div class="field">
+    <label class="field__label" for="target_url">Target URL</label>
+    <input class="input mono" type="url" id="target_url" name="target_url" value="{{.TargetURL}}" required
+           placeholder="https://example.com/webhooks" autocomplete="url" spellcheck="false"
+           aria-describedby="target_url-hint{{if index .Errors "target_url"}} target_url-error{{end}}"{{if index .Errors "target_url"}} aria-invalid="true"{{end}}>
+    <p class="field__hint" id="target_url-hint">Deliveries are POSTed here as JSON. Private and internal network addresses are rejected.</p>
+    {{with index .Errors "target_url"}}<p class="field__error" id="target_url-error">{{.}}</p>{{end}}
+  </div>
+
+  <div class="field">
+    <label class="field__label" for="event_types">Event types <span class="field__optional">(optional)</span></label>
+    <input class="input mono" type="text" id="event_types" name="event_types" value="{{.EventTypes}}"
+           placeholder="order.created, order.paid" spellcheck="false" aria-describedby="event_types-hint">
+    <p class="field__hint" id="event_types-hint">Comma-separated allowlist matched against the <span class="mono">X-Event-Type</span> header. Leave empty to accept every event.</p>
+  </div>
+
+  <div class="field">
+    <label class="field__label" for="secret">Signing secret <span class="field__optional">(optional)</span></label>
+    <input class="input mono" type="password" id="secret" name="secret" autocomplete="new-password" spellcheck="false"
+           aria-describedby="secret-hint{{if index .Errors "secret"}} secret-error{{end}}"{{if index .Errors "secret"}} aria-invalid="true"{{end}}>
+    <p class="field__hint" id="secret-hint">{{if and .Editing .HasSecret}}A secret is set. Leave this blank to keep it.{{else}}Incoming events must carry a matching <span class="mono">X-Hub-Signature-256</span>, and outgoing deliveries are signed with Standard Webhooks headers.{{end}}</p>
+    {{with index .Errors "secret"}}<p class="field__error" id="secret-error">{{.}}</p>{{end}}
+    {{if and .Editing .HasSecret}}<label class="checkbox"><input type="checkbox" name="clear_secret"{{if .ClearSecret}} checked{{end}}> Remove the secret (deliveries go out unsigned)</label>{{end}}
+  </div>
+
+  <div class="form__actions">
+    <button class="btn btn--primary" type="submit">{{if .Editing}}Save changes{{else}}Create subscription{{end}}</button>
+    <a class="btn btn--ghost" href="{{if .Editing}}/ui/subscriptions/{{.Sub.ID}}/logs{{else}}/ui/subscriptions{{end}}">Cancel</a>
+  </div>
+</form>{{end}}{{end}}
+
+{{define "test_form"}}{{with .Data}}<form id="test-form" class="form form--wide" method="post" action="/ui/subscriptions/{{.Sub.ID}}/test"
+      hx-post="/ui/subscriptions/{{.Sub.ID}}/test" hx-swap="outerHTML" novalidate>
+  {{template "form_summary" .Errors}}
+
+  <div class="field">
+    <label class="field__label" for="event_type">Event type <span class="field__optional">(optional)</span></label>
+    <input class="input mono" type="text" id="event_type" name="event_type" value="{{.EventType}}" spellcheck="false"
+           aria-describedby="event_type-hint{{if index .Errors "event_type"}} event_type-error{{end}}"{{if index .Errors "event_type"}} aria-invalid="true"{{end}}>
+    <p class="field__hint" id="event_type-hint">Sent as <span class="mono">X-Event-Type</span>. {{if .Sub.EventTypes.String}}This subscription accepts <span class="mono">{{.Sub.EventTypes.String}}</span>.{{else}}This subscription accepts every event type.{{end}}</p>
+    {{with index .Errors "event_type"}}<p class="field__error" id="event_type-error">{{.}}</p>{{end}}
+  </div>
+
+  <div class="field">
+    <label class="field__label" for="payload">Payload</label>
+    <textarea class="textarea" id="payload" name="payload" rows="12" spellcheck="false"
+              aria-describedby="payload-hint{{if index .Errors "payload"}} payload-error{{end}}"{{if index .Errors "payload"}} aria-invalid="true"{{end}}>{{.Payload}}</textarea>
+    <p class="field__hint" id="payload-hint">Queued exactly like an ingested event, so it goes through the same retries, signing and logging.</p>
+    {{with index .Errors "payload"}}<p class="field__error" id="payload-error">{{.}}</p>{{end}}
+  </div>
+
+  <div class="form__actions">
+    <button class="btn btn--primary" type="submit">Queue test event</button>
+  </div>
+</form>{{end}}{{end}}

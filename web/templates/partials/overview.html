@@ -1,0 +1,157 @@
+{{/* Polled regions for the overview and backlog pages. Each renders its own
+     wrapper (outerHTML swap) and, as a fragment, moves the "updated" stamp. */}}
+
+{{define "dashboard_stats"}}<div id="dashboard-stats" hx-get="/ui/dashboard" hx-trigger="every 10s" hx-swap="outerHTML" data-poll>
+{{template "degraded" $}}
+{{with .Data}}
+  {{$rate := pct .Attempts.Successful .AttemptsAll}}
+  {{if not .DatabaseOK}}
+  <section class="verdict verdict--bad" aria-labelledby="verdict-title">
+    <div class="verdict__state">{{badge "outcome" "failed_attempt"}}<h2 class="verdict__title" id="verdict-title">The database is not answering</h2></div>
+    <p class="verdict__detail">Ingest returns 503 and the worker cannot claim tasks until it recovers. Check <span class="mono">TURSO_DATABASE_URL</span> and the <a href="/readyz">readiness probe</a>.</p>
+  </section>
+  {{else if eq .AttemptsAll 0}}
+  <section class="verdict" aria-labelledby="verdict-title">
+    <div class="verdict__state"><h2 class="verdict__title" id="verdict-title">No delivery attempts in the last 24 hours</h2></div>
+    <p class="verdict__detail">{{if eq .Subs.Total 0}}Create a subscription, then send a test event to see the pipeline work end to end.{{else}}Events posted to <span class="mono">/ingest/&lt;subscription id&gt;</span> show up here as soon as the worker delivers them.{{end}}</p>
+    {{if eq .Subs.Total 0}}<p><a class="btn btn--primary" href="/ui/subscriptions/new">New subscription</a></p>{{end}}
+  </section>
+  {{else}}
+  <section class="verdict verdict--{{if ge .SuccessRate 99.0}}ok{{else if ge .SuccessRate 90.0}}warn{{else}}bad{{end}}" aria-labelledby="verdict-title">
+    <div class="verdict__state">
+      {{if ge .SuccessRate 99.0}}<span class="badge badge--ok">healthy</span>{{else if ge .SuccessRate 90.0}}<span class="badge badge--warn">degraded</span>{{else}}<span class="badge badge--bad">failing</span>{{end}}
+      <h2 class="verdict__title" id="verdict-title">{{printf "%.1f" .SuccessRate}}% of delivery attempts succeeded</h2>
+    </div>
+    <div class="meter" role="img" aria-label="{{printf "%.1f" .SuccessRate}} percent success"><span class="meter__fill {{rateClass .SuccessRate .AttemptsAll}} {{widthClass $rate}}"></span></div>
+    <p class="verdict__detail">{{.Attempts.Successful}} of {{.AttemptsAll}} {{plural .AttemptsAll "attempt" "attempts"}} in the last 24 hours.
+      {{if gt .Attempts.Failed 0}}{{.Attempts.Failed}} failed and {{if gt .QueueDepth 0}}{{.QueueDepth}} {{plural .QueueDepth "task is" "tasks are"}} still queued{{else}}the queue is empty{{end}}.{{end}}
+      {{if gt .DLQ.Dead 0}}<a href="/ui/dlq?status=dead">{{.DLQ.Dead}} dead {{plural .DLQ.Dead "letter needs" "letters need"}} attention.</a>{{end}}</p>
+  </section>
+  {{end}}
+
+  <div class="ledger">
+    <section class="ledger__group" aria-labelledby="l-queue">
+      <div class="ledger__head"><h2 id="l-queue">Queue</h2><a href="/ui/backlog">Backlog</a></div>
+      <dl class="ledger__rows">
+        <div class="ledger__row"><dt>Waiting</dt><dd>{{.Tasks.Pending}}</dd></div>
+        <div class="ledger__row"><dt>In flight</dt><dd>{{.Tasks.InFlight}}</dd></div>
+        <div class="ledger__row{{if gt .Backlog.RetryingTasks 0}} ledger__row--warn{{end}}"><dt>Retrying</dt><dd>{{.Backlog.RetryingTasks}}</dd></div>
+        <div class="ledger__row"><dt>Delivered</dt><dd>{{.Tasks.Delivered}}</dd></div>
+        <div class="ledger__row{{if gt .Tasks.Failed 0}} ledger__row--alert{{end}}"><dt>Failed</dt><dd>{{.Tasks.Failed}}</dd></div>
+      </dl>
+    </section>
+
+    <section class="ledger__group" aria-labelledby="l-dlq">
+      <div class="ledger__head"><h2 id="l-dlq">Dead letters</h2><a href="/ui/dlq">Open queue</a></div>
+      <dl class="ledger__rows">
+        <div class="ledger__row{{if gt .DLQ.Dead 0}} ledger__row--alert{{end}}"><dt>Dead, awaiting action</dt><dd><a href="/ui/dlq?status=dead">{{.DLQ.Dead}}</a></dd></div>
+        <div class="ledger__row"><dt>Retried</dt><dd><a href="/ui/dlq?status=retried">{{.DLQ.Retried}}</a></dd></div>
+      </dl>
+    </section>
+
+    <section class="ledger__group" aria-labelledby="l-sched">
+      <div class="ledger__head"><h2 id="l-sched">Scheduled</h2><a href="/ui/scheduled">All schedules</a></div>
+      <dl class="ledger__rows">
+        <div class="ledger__row"><dt>Pending</dt><dd>{{.Sched.Pending}}</dd></div>
+        <div class="ledger__row"><dt>Enqueued</dt><dd>{{.Sched.Enqueued}}</dd></div>
+        <div class="ledger__row{{if gt .Sched.Failed 0}} ledger__row--alert{{end}}"><dt>Failed to enqueue</dt><dd>{{.Sched.Failed}}</dd></div>
+        <div class="ledger__row"><dt>Cancelled</dt><dd>{{.Sched.Cancelled}}</dd></div>
+      </dl>
+    </section>
+
+    <section class="ledger__group" aria-labelledby="l-sys">
+      <div class="ledger__head"><h2 id="l-sys">System</h2><a href="/ui/subscriptions">Subscriptions</a></div>
+      <dl class="ledger__rows">
+        <div class="ledger__row"><dt>Subscriptions</dt><dd><a href="/ui/subscriptions">{{.Subs.Total}}</a></dd></div>
+        <div class="ledger__row{{if gt .Subs.Paused 0}} ledger__row--warn{{end}}"><dt>Paused</dt><dd>{{.Subs.Paused}}</dd></div>
+        <div class="ledger__row"><dt>Database</dt><dd class="ledger__text">{{if .DatabaseOK}}<span class="badge badge--ok">reachable</span>{{else}}<span class="badge badge--bad">unreachable</span>{{end}}</dd></div>
+        <div class="ledger__row"><dt>Subscription cache</dt><dd class="ledger__text">{{if not .CacheEnabled}}<span class="badge">not configured</span>{{else if .CacheOK}}<span class="badge badge--ok">reachable</span>{{else}}<span class="badge badge--warn">unreachable</span>{{end}}</dd></div>
+      </dl>
+    </section>
+  </div>
+{{end}}
+{{if .Fragment}}{{template "last_updated_oob" .}}{{end}}
+</div>{{end}}
+
+{{define "backlog_body"}}<div id="backlog-body" hx-get="/ui/backlog" hx-trigger="every 10s" hx-swap="outerHTML" data-poll>
+{{template "degraded" $}}
+{{with .Data}}
+  <div class="ledger">
+    <section class="ledger__group" aria-labelledby="b-wait">
+      <div class="ledger__head"><h2 id="b-wait">Waiting</h2></div>
+      <dl class="ledger__rows">
+        <div class="ledger__row"><dt>Total waiting</dt><dd>{{.Stats.TotalPending}}</dd></div>
+        <div class="ledger__row"><dt>Never attempted</dt><dd>{{.Stats.NewTasks}}</dd></div>
+        <div class="ledger__row{{if gt .Stats.RetryingTasks 0}} ledger__row--warn{{end}}"><dt>Retrying</dt><dd>{{.Stats.RetryingTasks}}</dd></div>
+        <div class="ledger__row"><dt>Backing off now</dt><dd>{{.Stats.WaitingForRetry}}</dd></div>
+      </dl>
+    </section>
+    <section class="ledger__group" aria-labelledby="b-workers">
+      <div class="ledger__head"><h2 id="b-workers">Workers</h2></div>
+      <dl class="ledger__rows">
+        <div class="ledger__row"><dt>In flight</dt><dd>{{.InFlightCount}}</dd></div>
+        <div class="ledger__row"><dt>Most attempts on one task</dt><dd>{{.Stats.MaxAttempts}}</dd></div>
+        <div class="ledger__row"><dt>Oldest waiting task</dt><dd class="ledger__text">{{if .HasOldest}}{{.OldestAge}} old{{else}}<span class="muted">none</span>{{end}}</dd></div>
+      </dl>
+    </section>
+  </div>
+
+  <section class="section" aria-labelledby="b-subs">
+    <div class="section__head"><h2 id="b-subs">Waiting by subscription</h2><p class="section__note">Top 20 by queue size</p></div>
+    {{if .BySubscription}}
+    <div class="table-wrap"><table class="table">
+      <thead><tr><th scope="col">Target</th><th scope="col" class="num">Waiting</th><th scope="col" class="num">Retrying</th><th scope="col" class="num">Max attempts</th><th scope="col">Oldest</th></tr></thead>
+      <tbody>{{range .BySubscription}}<tr>
+        <td class="cell-url"><a href="/ui/subscriptions/{{.SubscriptionID}}/logs">{{.TargetUrl}}</a><span class="cell-sub">{{short .SubscriptionID}}</span></td>
+        <td class="num">{{.PendingCount}}</td><td class="num">{{.RetryingCount}}</td><td class="num">{{.MaxAttempts}}</td>
+        <td>{{timeTag .OldestCreatedAt}}</td>
+      </tr>{{end}}</tbody>
+    </table></div>
+    {{else}}<div class="empty"><strong>Nothing is waiting.</strong><span>New events are claimed within a second or two of arriving.</span></div>{{end}}
+  </section>
+
+  <section class="section" aria-labelledby="b-dist">
+    <div class="section__head"><h2 id="b-dist">Attempts per waiting task</h2>{{if .DistTotal}}<p class="section__note">{{.DistTotal}} {{plural .DistTotal "task" "tasks"}}</p>{{end}}</div>
+    {{if .Distribution}}
+    <div class="dist">{{range .Distribution}}<div class="dist__row">
+      <span class="dist__label">{{if eq .Attempts 0}}not yet tried{{else}}{{.Attempts}} {{plural .Attempts "attempt" "attempts"}}{{end}}</span>
+      <div class="meter meter--thin" role="img" aria-label="{{.Pct}} percent"><span class="meter__fill {{if ge .Attempts 3}}fill--warn{{else}}fill--neutral{{end}} {{widthClass .Pct}}"></span></div>
+      <span class="dist__value">{{.Count}} · {{.Pct}}%</span>
+    </div>{{end}}</div>
+    {{else}}<p class="muted">No waiting tasks.</p>{{end}}
+  </section>
+
+  <section class="section" aria-labelledby="b-flight">
+    <div class="section__head"><h2 id="b-flight">In flight</h2><p class="section__note">Claimed by a worker and leased</p></div>
+    {{if .InFlight}}
+    <div class="table-wrap"><table class="table">
+      <thead><tr><th scope="col">Task</th><th scope="col">Target</th><th scope="col" class="num">Prior attempts</th><th scope="col">Worker</th><th scope="col">Lease ends</th></tr></thead>
+      <tbody>{{range .InFlight}}<tr>
+        <td class="mono">{{short .ID}}</td>
+        <td class="cell-url"><a href="/ui/subscriptions/{{.SubscriptionID}}/logs">{{.TargetUrl}}</a></td>
+        <td class="num">{{.AttemptCount}}</td>
+        <td class="mono">{{nullStr .ClaimedBy}}</td>
+        <td>{{timeTag .LeaseUntil}}</td>
+      </tr>{{end}}</tbody>
+    </table></div>
+    {{else}}<p class="muted">No deliveries in progress.</p>{{end}}
+  </section>
+
+  <section class="section" aria-labelledby="b-retry">
+    <div class="section__head"><h2 id="b-retry">Retrying</h2><p class="section__note">Failed at least once, waiting for the next attempt</p></div>
+    {{if .Retrying}}
+    <div class="table-wrap"><table class="table">
+      <thead><tr><th scope="col">Task</th><th scope="col">Target</th><th scope="col" class="num">Attempts</th><th scope="col">Next attempt</th><th scope="col">Created</th></tr></thead>
+      <tbody>{{range .Retrying}}<tr>
+        <td class="mono">{{short .ID}}</td>
+        <td class="cell-url"><a href="/ui/subscriptions/{{.SubscriptionID}}/logs">{{.TargetUrl}}</a></td>
+        <td class="num">{{.AttemptCount}}</td>
+        <td>{{timeTag .NextAttemptAt}}</td>
+        <td>{{timeTag .CreatedAt}}</td>
+      </tr>{{end}}</tbody>
+    </table></div>
+    {{else}}<p class="muted">No tasks are retrying.</p>{{end}}
+  </section>
+{{end}}
+{{if .Fragment}}{{template "last_updated_oob" .}}{{end}}
+</div>{{end}}

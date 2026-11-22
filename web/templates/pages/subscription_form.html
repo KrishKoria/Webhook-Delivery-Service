@@ -1,0 +1,19 @@
+{{define "content"}}
+{{if .Data.Editing}}{{template "sub_header" .Data}}{{else}}
+<header class="page-head">
+  <p class="crumbs"><a href="/ui/subscriptions">Subscriptions</a></p>
+  <h1>New subscription</h1>
+</header>{{end}}
+{{template "sub_form" .}}
+{{if .Data.Editing}}
+<section class="danger-zone" aria-labelledby="danger-title">
+  <div>
+    <h2 id="danger-title">Delete subscription</h2>
+    <p>Removes the subscription with its delivery logs, queued tasks and schedules. Events sent to its ingest URL start returning 404.</p>
+  </div>
+  <form method="post" action="/ui/subscriptions/{{.Data.Sub.ID}}/delete" data-confirm="Delete this subscription and everything attached to it?">
+    <button class="btn btn--danger" type="submit">Delete subscription</button>
+  </form>
+</section>
+{{end}}
+{{end}}
