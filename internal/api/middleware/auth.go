@@ -7,14 +7,13 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 )
 
-// ErrAdminCredentialsMissing is returned when admin auth is required but not configured.
-var ErrAdminCredentialsMissing = errors.New(
-	"admin auth: set ADMIN_USERNAME and ADMIN_PASSWORD, or ADMIN_AUTH_DISABLED=true for local development")
+// ErrAdminCredentialsIncomplete is returned when only one of the two admin credentials is set.
+var ErrAdminCredentialsIncomplete = errors.New(
+	"admin auth: set both ADMIN_USERNAME and ADMIN_PASSWORD to require a login, or neither to leave the admin console open")
 
 // AdminAuthConfig holds admin authentication configuration.
 // The zero value requires credentials; Disabled must be chosen explicitly.
@@ -24,44 +23,37 @@ type AdminAuthConfig struct {
 	Password string
 }
 
-// LoadAdminAuthConfig reads admin auth settings and fails closed:
-//   - ADMIN_USERNAME + ADMIN_PASSWORD enable Basic Auth (the default and only safe mode).
-//   - ADMIN_AUTH_DISABLED=true turns auth off, with a loud warning.
-//   - ADMIN_AUTH_ENABLED (the pre-2026 switch) is ignored whatever its value. A
-//     leftover ADMIN_AUTH_ENABLED=false on an old deployment must not silently
-//     keep the console public; turning auth off takes the explicit new variable.
+// LoadAdminAuthConfig reads admin auth settings. Auth is opt-in so the demo
+// console can be browsed without a login:
+//   - neither ADMIN_USERNAME nor ADMIN_PASSWORD set: admin routes are open (logged).
+//   - both set: HTTP Basic Auth on every admin API and UI route.
+//   - only one set: ErrAdminCredentialsIncomplete. A half-entered credential is a
+//     mistake, and quietly serving an open console would hide it.
 //
-// It returns ErrAdminCredentialsMissing when auth is on but credentials are missing.
+// ADMIN_AUTH_ENABLED and ADMIN_AUTH_DISABLED from earlier versions are ignored.
 func LoadAdminAuthConfig(logger *slog.Logger) (AdminAuthConfig, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	disabled := envTrue("ADMIN_AUTH_DISABLED")
-	if _, ok := os.LookupEnv("ADMIN_AUTH_ENABLED"); ok {
-		logger.Warn("ADMIN_AUTH_ENABLED is no longer read and has no effect; remove it. Admin auth is always on unless ADMIN_AUTH_DISABLED=true")
-	}
-	if disabled {
-		logger.Warn("ADMIN AUTH IS DISABLED: every admin API and UI route is open to anyone who can reach this server. Never run like this outside local development.")
-		return AdminAuthConfig{Disabled: true}, nil
+	for _, legacy := range []string{"ADMIN_AUTH_ENABLED", "ADMIN_AUTH_DISABLED"} {
+		if _, ok := os.LookupEnv(legacy); ok {
+			logger.Warn(legacy + " is no longer read and has no effect; remove it. Admin auth is on exactly when ADMIN_USERNAME and ADMIN_PASSWORD are set")
+		}
 	}
 
 	cfg := AdminAuthConfig{
 		Username: os.Getenv("ADMIN_USERNAME"),
 		Password: os.Getenv("ADMIN_PASSWORD"),
 	}
-	if cfg.Username == "" || cfg.Password == "" {
-		return AdminAuthConfig{}, ErrAdminCredentialsMissing
+	switch {
+	case cfg.Username == "" && cfg.Password == "":
+		logger.Warn("admin authentication is off: the admin API and UI are open to anyone who can reach this server. Set ADMIN_USERNAME and ADMIN_PASSWORD to require a login")
+		return AdminAuthConfig{Disabled: true}, nil
+	case cfg.Username == "" || cfg.Password == "":
+		return AdminAuthConfig{}, ErrAdminCredentialsIncomplete
 	}
 	logger.Info("admin authentication enabled")
 	return cfg, nil
-}
-
-func envTrue(key string) bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
-	case "1", "true", "yes":
-		return true
-	}
-	return false
 }
 
 // authorized reports whether the request carries the configured credentials.

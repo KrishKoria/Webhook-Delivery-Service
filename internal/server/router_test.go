@@ -33,7 +33,6 @@ func newHarness(t *testing.T) *harness {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("ADMIN_USERNAME", testUser)
 	t.Setenv("ADMIN_PASSWORD", testPass)
-	t.Setenv("ADMIN_AUTH_DISABLED", "")
 	t.Setenv("WEBHOOK_ALLOW_PRIVATE_IPS", "true") // no DNS lookups for example.com targets
 	t.Setenv("INGEST_MAX_BODY_SIZE", "1024")
 	conn, _ := testdb.New(t)
@@ -122,14 +121,28 @@ func TestRouterBuildsWithoutRouteConflicts(t *testing.T) {
 	newHarness(t)
 }
 
-func TestRouterFailsClosedWithoutAdminCredentials(t *testing.T) {
+func TestRouterIsOpenWithoutAdminCredentials(t *testing.T) {
+	gin.SetMode(gin.TestMode)
 	t.Setenv("ADMIN_USERNAME", "")
 	t.Setenv("ADMIN_PASSWORD", "")
-	t.Setenv("ADMIN_AUTH_DISABLED", "")
-	t.Setenv("ADMIN_AUTH_ENABLED", "")
+	conn, _ := testdb.New(t)
+	r, err := NewRouter(Deps{Context: t.Context(), DB: conn, Logger: slog.New(slog.DiscardHandler)})
+	if err != nil {
+		t.Fatalf("NewRouter without admin credentials: %v", err)
+	}
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/ui/nope", nil))
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("unknown UI path without credentials configured = %d, want 404 (no login)", w.Code)
+	}
+}
+
+func TestRouterRejectsHalfConfiguredAdminCredentials(t *testing.T) {
+	t.Setenv("ADMIN_USERNAME", "admin")
+	t.Setenv("ADMIN_PASSWORD", "")
 	conn, _ := testdb.New(t)
 	if _, err := NewRouter(Deps{DB: conn, Logger: slog.New(slog.DiscardHandler)}); err == nil {
-		t.Fatal("NewRouter succeeded without admin credentials")
+		t.Fatal("NewRouter succeeded with only ADMIN_USERNAME set")
 	}
 }
 

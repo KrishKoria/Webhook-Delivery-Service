@@ -34,7 +34,7 @@ type Deps struct {
 }
 
 // NewRouter builds the Gin engine with all routes and middleware registered.
-// It fails when admin auth is not configured (see middleware.LoadAdminAuthConfig).
+// It fails when admin auth is half-configured (see middleware.LoadAdminAuthConfig).
 //
 // Route groups:
 //   - probes:     /healthz, /livez, /readyz (no auth)
