@@ -31,27 +31,27 @@ func (u *UI) Dashboard(c *gin.Context) {
 	v := dashboardView{DatabaseOK: true, CacheEnabled: u.Cache != nil}
 
 	var err error
-	if v.Subs, err = u.Q.UISubscriptionCounts(c); err != nil {
+	if v.Subs, err = u.Q.UISubscriptionCounts(c.Request.Context()); err != nil {
 		v.DatabaseOK = false
 		u.degrade(c, p, "subscriptions", err)
 	}
-	if v.Tasks, err = u.Q.UITaskStatusCounts(c); err != nil {
+	if v.Tasks, err = u.Q.UITaskStatusCounts(c.Request.Context()); err != nil {
 		u.degrade(c, p, "queue depth", err)
 	}
-	if v.Attempts, err = u.Q.UIAttemptStats(c, 24); err != nil {
+	if v.Attempts, err = u.Q.UIAttemptStats(c.Request.Context(), 24); err != nil {
 		u.degrade(c, p, "delivery outcomes", err)
 	}
-	if v.DLQ, err = u.Q.UIDLQCounts(c); err != nil {
+	if v.DLQ, err = u.Q.UIDLQCounts(c.Request.Context()); err != nil {
 		u.degrade(c, p, "dead letter queue", err)
 	}
-	if v.Sched, err = u.Q.UIScheduledCounts(c); err != nil {
+	if v.Sched, err = u.Q.UIScheduledCounts(c.Request.Context()); err != nil {
 		u.degrade(c, p, "scheduled webhooks", err)
 	}
-	if v.Backlog, err = u.Q.UIBacklogStats(c); err != nil {
+	if v.Backlog, err = u.Q.UIBacklogStats(c.Request.Context()); err != nil {
 		u.degrade(c, p, "backlog", err)
 	}
 	if u.Cache != nil {
-		v.CacheOK = u.Cache.Ping(c) == nil
+		v.CacheOK = u.Cache.Ping(c.Request.Context()) == nil
 	}
 
 	v.QueueDepth = v.Tasks.Pending + v.Tasks.InFlight
@@ -88,19 +88,19 @@ func (u *UI) Backlog(c *gin.Context) {
 	var v backlogView
 	var err error
 
-	if v.Stats, err = u.Q.UIBacklogStats(c); err != nil {
+	if v.Stats, err = u.Q.UIBacklogStats(c.Request.Context()); err != nil {
 		u.degrade(c, p, "backlog totals", err)
 	}
 	if t, ok := asTime(v.Stats.OldestCreatedAt); ok {
 		v.OldestAge, v.HasOldest = time.Since(t).Round(time.Second), true
 	}
-	if v.InFlightCount, err = u.Q.UIInFlightCount(c); err != nil {
+	if v.InFlightCount, err = u.Q.UIInFlightCount(c.Request.Context()); err != nil {
 		u.degrade(c, p, "in-flight count", err)
 	}
-	if v.BySubscription, err = u.Q.UIBacklogBySubscription(c, 20); err != nil {
+	if v.BySubscription, err = u.Q.UIBacklogBySubscription(c.Request.Context(), 20); err != nil {
 		u.degrade(c, p, "backlog by subscription", err)
 	}
-	dist, err := u.Q.UIRetryDistribution(c)
+	dist, err := u.Q.UIRetryDistribution(c.Request.Context())
 	u.degrade(c, p, "retry distribution", err)
 	for _, d := range dist {
 		v.DistTotal += d.TaskCount
@@ -108,10 +108,10 @@ func (u *UI) Backlog(c *gin.Context) {
 	for _, d := range dist {
 		v.Distribution = append(v.Distribution, retryBucket{Attempts: d.AttemptCount, Count: d.TaskCount, Pct: pct(d.TaskCount, v.DistTotal)})
 	}
-	if v.InFlight, err = u.Q.UIListTasksByStatus(c, database.UIListTasksByStatusParams{Status: "in_flight", Lim: 20}); err != nil {
+	if v.InFlight, err = u.Q.UIListTasksByStatus(c.Request.Context(), database.UIListTasksByStatusParams{Status: "in_flight", Lim: 20}); err != nil {
 		u.degrade(c, p, "in-flight tasks", err)
 	}
-	if v.Retrying, err = u.Q.UIListTasksByStatus(c, database.UIListTasksByStatusParams{Status: "pending", RetryingOnly: 1, Lim: 20}); err != nil {
+	if v.Retrying, err = u.Q.UIListTasksByStatus(c.Request.Context(), database.UIListTasksByStatusParams{Status: "pending", RetryingOnly: 1, Lim: 20}); err != nil {
 		u.degrade(c, p, "retrying tasks", err)
 	}
 	p.Data = v

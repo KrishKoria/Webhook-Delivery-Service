@@ -40,7 +40,7 @@ func (u *UI) ListDLQ(c *gin.Context) {
 		Statuses:     dlqStatuses,
 		Subscription: c.Query("subscription"),
 	}
-	rows, err := u.Q.UIListDLQ(c, database.UIListDLQParams{
+	rows, err := u.Q.UIListDLQ(c.Request.Context(), database.UIListDLQParams{
 		Status: v.Status, SubscriptionID: v.Subscription,
 		Lim: dlqPerPage + 1, Off: int64((page - 1) * dlqPerPage),
 	})
@@ -53,7 +53,7 @@ func (u *UI) ListDLQ(c *gin.Context) {
 		rows = rows[:dlqPerPage]
 	}
 	v.Rows = rows
-	v.Counts, err = u.Q.UIDLQCounts(c)
+	v.Counts, err = u.Q.UIDLQCounts(c.Request.Context())
 	u.degrade(c, p, "dead letter totals", err)
 	filters := url.Values{"status": {v.Status}, "subscription": {v.Subscription}}
 	v.Pager = newPager(filters, dlqListPath, page, hasNext)
@@ -77,7 +77,7 @@ type dlqDetailView struct {
 
 // DLQDetail handles GET /ui/dlq/:dlq_id.
 func (u *UI) DLQDetail(c *gin.Context) {
-	e, err := u.Q.UIGetDLQEntry(c, c.Param("dlq_id"))
+	e, err := u.Q.UIGetDLQEntry(c.Request.Context(), c.Param("dlq_id"))
 	if err != nil {
 		u.failErr(c, "Dead letter entry", err)
 		return
@@ -114,7 +114,7 @@ func isDLQEntryPath(p string) bool {
 // is a 409 that tells the user it was already retried.
 func (u *UI) RetryDLQ(c *gin.Context) {
 	id := c.Param("dlq_id")
-	_, err := u.Ops.RetryDLQ(c, id, dlqUINote)
+	_, err := u.Ops.RetryDLQ(c.Request.Context(), id, dlqUINote)
 	status, flash := http.StatusOK, "dlq_retried"
 	switch {
 	case errors.Is(err, ops.ErrConflict):
@@ -124,7 +124,7 @@ func (u *UI) RetryDLQ(c *gin.Context) {
 		return
 	}
 	if isHX(c) {
-		e, getErr := u.Q.UIGetDLQEntry(c, id)
+		e, getErr := u.Q.UIGetDLQEntry(c.Request.Context(), id)
 		if getErr != nil {
 			u.failErr(c, "Dead letter entry", getErr)
 			return
@@ -139,7 +139,7 @@ func (u *UI) RetryDLQ(c *gin.Context) {
 
 // DeleteDLQ handles POST /ui/dlq/:dlq_id/delete.
 func (u *UI) DeleteDLQ(c *gin.Context) {
-	n, err := u.Q.UIDeleteDLQEntries(c, []string{c.Param("dlq_id")})
+	n, err := u.Q.UIDeleteDLQEntries(c.Request.Context(), []string{c.Param("dlq_id")})
 	if err == nil && n == 0 {
 		err = ops.ErrNotFound
 	}
@@ -175,11 +175,11 @@ func (u *UI) BulkRetryDLQ(c *gin.Context) {
 		return
 	}
 	retried := 0
-	for _, r := range u.Ops.RetryDLQBulk(c, ids, dlqUINote) {
+	for _, r := range u.Ops.RetryDLQBulk(c.Request.Context(), ids, dlqUINote) {
 		if r.Error == "" {
 			retried++
 		} else if r.Error == "internal_error" {
-			u.Log.ErrorContext(c, "bulk dlq retry failed", "dlq_id", r.DLQID)
+			u.Log.ErrorContext(c.Request.Context(), "bulk dlq retry failed", "dlq_id", r.DLQID)
 		}
 	}
 	flash := "dlq_bulk_retried"
@@ -196,7 +196,7 @@ func (u *UI) BulkDeleteDLQ(c *gin.Context) {
 		u.redirect(c, dlqReturn(c), "dlq_none", -1)
 		return
 	}
-	n, err := u.Q.UIDeleteDLQEntries(c, ids)
+	n, err := u.Q.UIDeleteDLQEntries(c.Request.Context(), ids)
 	if err != nil {
 		u.failErr(c, "dead letter entries", err)
 		return
