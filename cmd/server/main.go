@@ -88,12 +88,15 @@ func run(ctx context.Context, logger *slog.Logger) error {
 		return fmt.Errorf("build router: %w", err)
 	}
 
-	// Background workers stop when ctx is cancelled; wg lets shutdown wait for them.
+	// Background workers stop when ctx is cancelled. Each Start returns only after
+	// its in-flight work has finished (the delivery worker also releases tasks it
+	// claimed but never started), so wg lets shutdown wait for them.
+	// Config comes from env: WORKER_*, WEBHOOK_*, *_RETENTION_* (see package delivery).
 	var wg sync.WaitGroup
 	for _, start := range []func(context.Context){
-		delivery.NewWorker(queries, subCache).Start,
-		delivery.NewCleanupWorker(queries).Start,
-		delivery.NewScheduledWorker(queries).Start,
+		delivery.NewWorker(db.DB, subCache, delivery.LoadWorkerConfigFromEnv()).Start,
+		delivery.NewCleanupWorker(db.DB, delivery.LoadCleanupConfigFromEnv()).Start,
+		delivery.NewScheduledWorker(db.DB).Start,
 	} {
 		wg.Go(func() { start(ctx) })
 	}

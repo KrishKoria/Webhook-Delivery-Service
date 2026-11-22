@@ -55,8 +55,7 @@ SET next_attempt_at = datetime('now', CAST(sqlc.arg(delay_seconds) AS INTEGER) |
 WHERE id = sqlc.arg(id);
 
 -- name: ClaimDeliveryTask :one
--- Two-step atomic claim is required because Turso/libSQL doesn't support subqueries in WHERE.
--- This is now a simple direct claim by ID - use GetNextClaimableTaskId first to get the ID.
+-- Deprecated: the delivery engine uses SelectClaimableTaskIDs + ClaimTasks.
 UPDATE delivery_tasks
 SET claimed_at = CURRENT_TIMESTAMP,
     claimed_by = sqlc.arg(worker_id),
@@ -68,8 +67,8 @@ WHERE id = sqlc.arg(task_id)
 RETURNING *;
 
 -- name: GetNextClaimableTaskId :one
--- Get the ID of the next task that can be claimed.
--- This must be called first, then ClaimDeliveryTask with the returned ID.
+-- Deprecated: the delivery engine uses SelectClaimableTaskIDs + ClaimTasks.
+-- Returns the oldest due pending task.
 SELECT id FROM delivery_tasks
 WHERE status = 'pending'
   AND (lease_until IS NULL OR lease_until < CURRENT_TIMESTAMP)
@@ -78,7 +77,7 @@ ORDER BY created_at ASC
 LIMIT 1;
 
 -- name: ReleaseTaskLease :exec
--- Release the lease on a task (called after successful delivery or when giving up).
+-- Deprecated: unguarded; the delivery engine uses ReleaseTask.
 UPDATE delivery_tasks
 SET claimed_at = NULL,
     claimed_by = NULL,
@@ -86,7 +85,7 @@ SET claimed_at = NULL,
 WHERE id = ?;
 
 -- name: ExtendTaskLease :exec
--- Extend the lease on a task that is taking longer than expected.
+-- Deprecated: the delivery engine uses ExtendTaskLeaseFor.
 UPDATE delivery_tasks
 SET lease_until = datetime(CURRENT_TIMESTAMP, '+' || ? || ' seconds')
 WHERE id = ? AND claimed_by = ?;
@@ -98,14 +97,13 @@ WHERE claimed_by = ? AND lease_until > CURRENT_TIMESTAMP
 ORDER BY claimed_at ASC;
 
 -- name: CountPendingClaimableTasks :one
--- Count tasks that are available to be claimed (for metrics/monitoring).
+-- Count tasks that are available to be claimed (same predicate as SelectClaimableTaskIDs).
 SELECT COUNT(*) as count FROM delivery_tasks
-WHERE status = 'pending'
-  AND (lease_until IS NULL OR lease_until < CURRENT_TIMESTAMP)
-  AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP);
+WHERE (status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP))
+   OR (status = 'in_flight' AND (lease_until IS NULL OR lease_until < CURRENT_TIMESTAMP));
 
 -- name: UpdateDeliveryTaskStatusAndReleaseLease :exec
--- Update task status and release the lease in one operation.
+-- Deprecated: unguarded; the delivery engine uses CompleteTask / ScheduleTaskRetry.
 UPDATE delivery_tasks
 SET status = ?,
     last_attempt_at = CURRENT_TIMESTAMP,
@@ -156,8 +154,10 @@ LIMIT ?;
 
 -- name: GetTaskQueueDepth :one
 -- Get count of tasks by status for queue monitoring.
+-- pending counts the whole backlog (pending + in_flight); in_flight is the claimed subset.
 SELECT
-    SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
+    SUM(CASE WHEN status IN ('pending', 'in_flight') THEN 1 ELSE 0 END) as pending,
+    SUM(CASE WHEN status = 'in_flight' THEN 1 ELSE 0 END) as in_flight,
     SUM(CASE WHEN status = 'delivered' THEN 1 ELSE 0 END) as delivered,
     SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
 FROM delivery_tasks;
@@ -185,50 +185,50 @@ GROUP BY strftime('%Y-%m-%d %H:00', timestamp)
 ORDER BY hour DESC;
 
 -- name: ListBacklogTasks :many
--- List tasks in the backlog (pending, not yet claimed, with retry info).
-SELECT 
+-- List tasks in the backlog (pending or in_flight, with retry info).
+SELECT
     dt.*,
     s.target_url as subscription_url
 FROM delivery_tasks dt
 JOIN subscriptions s ON dt.subscription_id = s.id
-WHERE dt.status = 'pending'
+WHERE dt.status IN ('pending', 'in_flight')
 ORDER BY dt.created_at ASC
 LIMIT ?;
 
 -- name: ListRetryingTasks :many
--- List tasks that are being retried (pending with attempt_count > 0).
-SELECT 
+-- List tasks that are being retried (pending or in_flight with attempt_count > 0).
+SELECT
     dt.*,
     s.target_url as subscription_url
 FROM delivery_tasks dt
 JOIN subscriptions s ON dt.subscription_id = s.id
-WHERE dt.status = 'pending' AND dt.attempt_count > 0
+WHERE dt.status IN ('pending', 'in_flight') AND dt.attempt_count > 0
 ORDER BY dt.next_attempt_at ASC
 LIMIT ?;
 
 -- name: ListActiveClaimedTasks :many
 -- List tasks currently being processed by workers.
-SELECT 
+SELECT
     dt.*,
     s.target_url as subscription_url
 FROM delivery_tasks dt
 JOIN subscriptions s ON dt.subscription_id = s.id
-WHERE dt.claimed_at IS NOT NULL AND dt.lease_until > CURRENT_TIMESTAMP
+WHERE dt.status = 'in_flight' AND dt.lease_until > CURRENT_TIMESTAMP
 ORDER BY dt.claimed_at ASC
 LIMIT ?;
 
 -- name: GetBacklogStats :one
--- Get comprehensive backlog statistics.
+-- Get comprehensive backlog statistics. The backlog is every pending or in_flight task.
 SELECT
     COUNT(*) as total_pending,
     SUM(CASE WHEN attempt_count = 0 THEN 1 ELSE 0 END) as new_tasks,
     SUM(CASE WHEN attempt_count > 0 THEN 1 ELSE 0 END) as retrying_tasks,
-    SUM(CASE WHEN claimed_at IS NOT NULL AND lease_until > CURRENT_TIMESTAMP THEN 1 ELSE 0 END) as claimed_tasks,
-    SUM(CASE WHEN next_attempt_at IS NOT NULL AND next_attempt_at > CURRENT_TIMESTAMP THEN 1 ELSE 0 END) as waiting_for_retry,
+    SUM(CASE WHEN status = 'in_flight' AND lease_until > CURRENT_TIMESTAMP THEN 1 ELSE 0 END) as claimed_tasks,
+    SUM(CASE WHEN status = 'pending' AND next_attempt_at IS NOT NULL AND next_attempt_at > CURRENT_TIMESTAMP THEN 1 ELSE 0 END) as waiting_for_retry,
     MAX(attempt_count) as max_retry_count,
     AVG(attempt_count) as avg_retry_count
 FROM delivery_tasks
-WHERE status = 'pending';
+WHERE status IN ('pending', 'in_flight');
 
 -- name: GetBacklogBySubscription :many
 -- Get backlog count grouped by subscription.
@@ -241,7 +241,7 @@ SELECT
     MIN(dt.created_at) as oldest_task
 FROM delivery_tasks dt
 JOIN subscriptions s ON dt.subscription_id = s.id
-WHERE dt.status = 'pending'
+WHERE dt.status IN ('pending', 'in_flight')
 GROUP BY dt.subscription_id
 ORDER BY pending_count DESC
 LIMIT ?;
@@ -252,6 +252,100 @@ SELECT
     attempt_count as retry_count,
     COUNT(*) as task_count
 FROM delivery_tasks
-WHERE status = 'pending' AND attempt_count > 0
+WHERE status IN ('pending', 'in_flight') AND attempt_count > 0
 GROUP BY attempt_count
 ORDER BY attempt_count ASC;
+
+-- ---------------------------------------------------------------------------
+-- Delivery engine (internal/delivery). Status model:
+--   pending -> in_flight -> delivered | failed   (retries go back to pending)
+-- Every write after a claim is guarded by claimed_by so a worker whose lease
+-- expired (and was reclaimed elsewhere) cannot overwrite the new owner's state.
+-- Turso historically rejected subqueries in UPDATE/DELETE WHERE, so claims and
+-- batch deletes select ids first and then act on id IN (...).
+-- ---------------------------------------------------------------------------
+
+-- name: SelectClaimableTaskIDs :many
+-- Due pending tasks, plus in_flight tasks whose lease has expired. A NULL
+-- next_attempt_at is treated as due (NULLs sort first).
+SELECT id FROM delivery_tasks
+WHERE (status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP))
+   OR (status = 'in_flight' AND (lease_until IS NULL OR lease_until < CURRENT_TIMESTAMP))
+ORDER BY next_attempt_at
+LIMIT sqlc.arg(max_tasks);
+
+-- name: ClaimTasks :many
+-- Claims the given ids for worker_id. The predicate is re-checked so only rows
+-- this worker actually won are returned.
+UPDATE delivery_tasks
+SET status = 'in_flight',
+    claimed_by = sqlc.arg(worker_id),
+    claimed_at = CURRENT_TIMESTAMP,
+    lease_until = datetime('now', CAST(sqlc.arg(lease_seconds) AS INTEGER) || ' seconds')
+WHERE id IN (sqlc.slice(ids))
+  AND ((status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP))
+    OR (status = 'in_flight' AND (lease_until IS NULL OR lease_until < CURRENT_TIMESTAMP)))
+RETURNING *;
+
+-- name: ExtendTaskLeaseFor :execrows
+-- Heartbeat: pushes the lease forward while the owner is still delivering.
+UPDATE delivery_tasks
+SET lease_until = datetime('now', CAST(sqlc.arg(lease_seconds) AS INTEGER) || ' seconds')
+WHERE id = sqlc.arg(id) AND claimed_by = sqlc.arg(worker_id) AND status = 'in_flight';
+
+-- name: CompleteTask :execrows
+-- Terminal finalize (status 'delivered' or 'failed') for the lease owner.
+UPDATE delivery_tasks
+SET status = sqlc.arg(status),
+    attempt_count = attempt_count + 1,
+    last_attempt_at = CURRENT_TIMESTAMP,
+    claimed_by = NULL,
+    claimed_at = NULL,
+    lease_until = NULL
+WHERE id = sqlc.arg(id) AND claimed_by = sqlc.arg(worker_id) AND status = 'in_flight';
+
+-- name: ScheduleTaskRetry :execrows
+-- Non-terminal finalize: counts the attempt and puts the task back to pending
+-- after delay_seconds.
+UPDATE delivery_tasks
+SET status = 'pending',
+    attempt_count = attempt_count + 1,
+    last_attempt_at = CURRENT_TIMESTAMP,
+    next_attempt_at = datetime('now', CAST(sqlc.arg(delay_seconds) AS INTEGER) || ' seconds'),
+    claimed_by = NULL,
+    claimed_at = NULL,
+    lease_until = NULL
+WHERE id = sqlc.arg(id) AND claimed_by = sqlc.arg(worker_id) AND status = 'in_flight';
+
+-- name: ReleaseTask :execrows
+-- Gives a claimed task back without counting an attempt (paused subscription,
+-- transient lookup error, shutdown before the delivery started).
+UPDATE delivery_tasks
+SET status = 'pending',
+    next_attempt_at = datetime('now', CAST(sqlc.arg(delay_seconds) AS INTEGER) || ' seconds'),
+    claimed_by = NULL,
+    claimed_at = NULL,
+    lease_until = NULL
+WHERE id = sqlc.arg(id) AND claimed_by = sqlc.arg(worker_id) AND status = 'in_flight';
+
+-- name: SelectExpiredDeliveryLogIDs :many
+SELECT id FROM delivery_logs
+WHERE timestamp < datetime('now', '-' || CAST(sqlc.arg(older_than_hours) AS INTEGER) || ' hours')
+LIMIT sqlc.arg(max_rows);
+
+-- name: DeleteDeliveryLogsByIDs :execrows
+DELETE FROM delivery_logs WHERE id IN (sqlc.slice(ids));
+
+-- name: SelectExpiredFinishedTaskIDs :many
+-- Terminal (delivered/failed) tasks whose last activity is older than the retention.
+SELECT id FROM delivery_tasks
+WHERE status IN ('delivered', 'failed')
+  AND COALESCE(last_attempt_at, created_at) < datetime('now', '-' || CAST(sqlc.arg(older_than_days) AS INTEGER) || ' days')
+LIMIT sqlc.arg(max_rows);
+
+-- name: DeleteDeliveryLogsForTaskIDs :execrows
+DELETE FROM delivery_logs WHERE delivery_task_id IN (sqlc.slice(ids));
+
+-- name: DeleteFinishedTasksByIDs :execrows
+DELETE FROM delivery_tasks
+WHERE id IN (sqlc.slice(ids)) AND status IN ('delivered', 'failed');

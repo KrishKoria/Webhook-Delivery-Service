@@ -8,13 +8,65 @@ package database
 import (
 	"context"
 	"database/sql"
+	"strings"
 )
 
+const claimScheduledWebhooks = `-- name: ClaimScheduledWebhooks :many
+UPDATE scheduled_webhooks
+SET status = 'enqueued', updated_at = CURRENT_TIMESTAMP
+WHERE status = 'pending' AND id IN (/*SLICE:ids*/?)
+RETURNING id, subscription_id, payload, scheduled_for, recurrence, status, created_at, updated_at
+`
+
+// Only rows still pending are returned, so concurrent schedulers never fire a row twice.
+func (q *Queries) ClaimScheduledWebhooks(ctx context.Context, ids []string) ([]ScheduledWebhook, error) {
+	query := claimScheduledWebhooks
+	var queryParams []interface{}
+	if len(ids) > 0 {
+		for _, v := range ids {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:ids*/?", strings.Repeat(",?", len(ids))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ScheduledWebhook
+	for rows.Next() {
+		var i ScheduledWebhook
+		if err := rows.Scan(
+			&i.ID,
+			&i.SubscriptionID,
+			&i.Payload,
+			&i.ScheduledFor,
+			&i.Recurrence,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countScheduledWebhooksByStatus = `-- name: CountScheduledWebhooksByStatus :one
-SELECT 
+SELECT
     COUNT(*) as total,
     SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
-    SUM(CASE WHEN status = 'delivered' THEN 1 ELSE 0 END) as delivered,
+    SUM(CASE WHEN status IN ('delivered', 'enqueued') THEN 1 ELSE 0 END) as delivered,
+    SUM(CASE WHEN status = 'enqueued' THEN 1 ELSE 0 END) as enqueued,
     SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
     SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled
 FROM scheduled_webhooks
@@ -24,10 +76,13 @@ type CountScheduledWebhooksByStatusRow struct {
 	Total     int64
 	Pending   sql.NullFloat64
 	Delivered sql.NullFloat64
+	Enqueued  sql.NullFloat64
 	Failed    sql.NullFloat64
 	Cancelled sql.NullFloat64
 }
 
+// The scheduler now marks fired rows 'enqueued' (older rows say 'delivered').
+// delivered counts both for compatibility; enqueued counts only the new status.
 func (q *Queries) CountScheduledWebhooksByStatus(ctx context.Context) (CountScheduledWebhooksByStatusRow, error) {
 	row := q.db.QueryRowContext(ctx, countScheduledWebhooksByStatus)
 	var i CountScheduledWebhooksByStatusRow
@@ -35,6 +90,7 @@ func (q *Queries) CountScheduledWebhooksByStatus(ctx context.Context) (CountSche
 		&i.Total,
 		&i.Pending,
 		&i.Delivered,
+		&i.Enqueued,
 		&i.Failed,
 		&i.Cancelled,
 	)
@@ -84,6 +140,7 @@ SELECT id, subscription_id, payload, scheduled_for, recurrence, status, created_
 WHERE scheduled_for <= CURRENT_TIMESTAMP AND status = 'pending'
 `
 
+// Deprecated: not exclusive; the scheduler uses SelectDueScheduledWebhookIDs + ClaimScheduledWebhooks.
 func (q *Queries) GetDueScheduledWebhooks(ctx context.Context) ([]ScheduledWebhook, error) {
 	rows, err := q.db.QueryContext(ctx, getDueScheduledWebhooks)
 	if err != nil {
@@ -216,6 +273,36 @@ func (q *Queries) ListScheduledWebhooks(ctx context.Context, arg ListScheduledWe
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const selectDueScheduledWebhookIDs = `-- name: SelectDueScheduledWebhookIDs :many
+SELECT id FROM scheduled_webhooks
+WHERE status = 'pending' AND scheduled_for <= CURRENT_TIMESTAMP
+ORDER BY scheduled_for
+LIMIT ?1
+`
+
+func (q *Queries) SelectDueScheduledWebhookIDs(ctx context.Context, maxRows int64) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, selectDueScheduledWebhookIDs, maxRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
