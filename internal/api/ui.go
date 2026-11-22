@@ -164,6 +164,11 @@ func (u *UI) show(c *gin.Context, page, fragment string, p *ViewPage) {
 
 // fail renders a styled error. htmx requests get an out-of-band toast only, so
 // the main swap is skipped and the current content stays in place.
+// NotFound renders the styled 404 page (a toast for htmx requests).
+func (u *UI) NotFound(c *gin.Context) {
+	u.fail(c, http.StatusNotFound, "There is no page at this address. It may have been deleted, or the link is mistyped.")
+}
+
 func (u *UI) fail(c *gin.Context, status int, msg string) {
 	if isHX(c) {
 		c.HTML(status, partialPrefix+"toast_oob", Flash{Kind: "error", Msg: msg})
