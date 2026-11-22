@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -70,6 +71,8 @@ func validateSchedule(req CreateScheduledRequest) (time.Time, string, string) {
 		return time.Time{}, "subscription_id", "subscription_id is required"
 	case req.Payload == "":
 		return time.Time{}, "payload", "payload is required"
+	case !json.Valid([]byte(req.Payload)):
+		return time.Time{}, "payload", "payload must be a string containing a JSON document"
 	case !validRecurrences[req.Recurrence]:
 		return time.Time{}, "recurrence", "recurrence must be none, daily, weekly or monthly"
 	}

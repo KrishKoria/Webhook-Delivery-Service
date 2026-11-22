@@ -225,7 +225,9 @@ var blockedRanges = []struct {
 
 // checkIP reports whether ip may be dialed for a webhook.
 func checkIP(ip netip.Addr) error {
-	ip = ip.Unmap()
+	// Prefix.Contains is always false for a zoned address ("::1%lo"), so drop
+	// the zone before matching or it would slip past every blocked range.
+	ip = ip.Unmap().WithZone("")
 	if !ip.IsValid() {
 		return fmt.Errorf("%w: invalid IP", ErrBlockedAddress)
 	}

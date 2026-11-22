@@ -106,7 +106,12 @@ type WorkerConfig struct {
 	MaxAttempts int
 	// Lease is how long a claim lasts without a heartbeat. Default max(60s, 2×HTTP.Timeout).
 	Lease time.Duration
-	HTTP  HTTPClientConfig
+	// DrainTimeout bounds how long in-flight deliveries may run after shutdown
+	// begins. When it expires their requests are aborted and the tasks released
+	// for immediate pickup by another instance, instead of staying in_flight
+	// until the lease expires. 0 waits for every delivery to finish.
+	DrainTimeout time.Duration
+	HTTP         HTTPClientConfig
 	// RetrySchedule overrides DefaultRetrySchedule (tests use short delays).
 	RetrySchedule []time.Duration
 	// DisableJitter turns off the ±20% jitter (tests only).
@@ -195,8 +200,9 @@ func NewWorker(conn *sql.DB, subCache *cache.RedisSubscriptionCache, cfg WorkerC
 func (w *Worker) ID() string { return w.cfg.WorkerID }
 
 // Start runs until ctx is cancelled. On cancellation it stops claiming, lets
-// deliveries already in progress finish, releases tasks that were claimed but
-// not started, and only then returns.
+// deliveries already in progress finish (up to DrainTimeout, then aborts and
+// releases them), releases tasks that were claimed but not started, and only
+// then returns.
 func (w *Worker) Start(ctx context.Context) {
 	w.log.Info("delivery worker starting",
 		"concurrency", w.cfg.Concurrency, "lease", w.cfg.Lease, "max_attempts", w.cfg.MaxAttempts)
@@ -205,6 +211,17 @@ func (w *Worker) Start(ctx context.Context) {
 	freed := make(chan struct{}, 1)
 	var busy atomic.Int64 // tasks claimed and not yet finished (queued or delivering)
 
+	// abortCtx outlives ctx: in-flight requests keep running after shutdown
+	// begins and are cancelled only when the drain budget runs out.
+	abortCtx, abort := context.WithCancel(context.WithoutCancel(ctx))
+	defer abort()
+	stopDrainTimer := context.AfterFunc(ctx, func() {
+		if w.cfg.DrainTimeout > 0 {
+			time.AfterFunc(w.cfg.DrainTimeout, abort)
+		}
+	})
+	defer stopDrainTimer()
+
 	var wg sync.WaitGroup
 	for range w.cfg.Concurrency {
 		wg.Go(func() {
@@ -212,7 +229,7 @@ func (w *Worker) Start(ctx context.Context) {
 				if ctx.Err() != nil {
 					w.release(context.WithoutCancel(ctx), task, 0, "shutdown")
 				} else {
-					w.process(ctx, task)
+					w.process(abortCtx, task)
 				}
 				busy.Add(-1)
 				select {
@@ -296,10 +313,11 @@ func (w *Worker) owner() sql.NullString {
 	return sql.NullString{String: w.cfg.WorkerID, Valid: true}
 }
 
-// process delivers one claimed task. It runs to completion even if parent is
-// cancelled, so a shutdown never abandons a request half-way.
-func (w *Worker) process(parent context.Context, task database.DeliveryTask) {
-	ctx := context.WithoutCancel(parent)
+// process delivers one claimed task. Cancelling abort cancels only the HTTP
+// request; a request aborted before any response arrives releases the task
+// without counting an attempt. Database work always runs to completion.
+func (w *Worker) process(abort context.Context, task database.DeliveryTask) {
+	ctx := context.WithoutCancel(abort)
 	log := w.taskLog(task)
 
 	sub, err := w.cache.GetOrLoad(ctx, task.SubscriptionID, func(ctx context.Context) (database.Subscription, error) {
@@ -319,8 +337,12 @@ func (w *Worker) process(parent context.Context, task database.DeliveryTask) {
 	}
 
 	stop := w.heartbeat(ctx, task)
-	res := w.deliver(ctx, task, sub)
+	res := w.deliver(abort, task, sub)
 	stop()
+	if res.Aborted {
+		w.release(ctx, task, 0, "shutdown_abort")
+		return
+	}
 
 	d := w.decide(task, res)
 	if err := w.finalize(ctx, task, sub.TargetUrl, &res, d); err != nil {
@@ -423,6 +445,7 @@ type attemptResult struct {
 	HTTPStatus int    // 0 if no response
 	Error      string // transport error or status + truncated body
 	RetryAfter time.Duration
+	Aborted    bool // the request was cancelled by shutdown before any response
 }
 
 // decision is what finalize writes.
@@ -586,7 +609,7 @@ func (w *Worker) deliver(ctx context.Context, task database.DeliveryTask, sub da
 
 	resp, err := w.client.Do(req)
 	if err != nil {
-		return attemptResult{Outcome: OutcomeFailedAttempt, Error: err.Error()}
+		return attemptResult{Outcome: OutcomeFailedAttempt, Error: err.Error(), Aborted: ctx.Err() != nil}
 	}
 	defer func() {
 		// Drain (bounded) so the keep-alive connection can be reused.
@@ -611,13 +634,26 @@ func (w *Worker) deliver(ctx context.Context, task database.DeliveryTask, sub da
 // Sign returns the Standard Webhooks signature header value for a message:
 // "v1," + base64(HMAC-SHA256(key=secret, msg=id + "." + timestamp + "." + body)).
 func Sign(secret, id string, timestamp int64, body []byte) string {
-	mac := hmac.New(sha256.New, []byte(secret))
+	mac := hmac.New(sha256.New, SigningKey(secret))
 	mac.Write([]byte(id))
 	mac.Write([]byte{'.'})
 	mac.Write([]byte(strconv.FormatInt(timestamp, 10)))
 	mac.Write([]byte{'.'})
 	mac.Write(body)
 	return "v1," + base64.StdEncoding.EncodeToString(mac.Sum(nil))
+}
+
+// SigningKey returns the HMAC key for a subscription secret. Standard Webhooks
+// secrets ("whsec_" + base64) are keyed with the decoded bytes, so official
+// verifier libraries accept the signatures; any other secret (including legacy
+// hex secrets) is used as its raw UTF-8 bytes.
+func SigningKey(secret string) []byte {
+	if rest, ok := strings.CutPrefix(secret, "whsec_"); ok {
+		if key, err := base64.StdEncoding.DecodeString(rest); err == nil && len(key) > 0 {
+			return key
+		}
+	}
+	return []byte(secret)
 }
 
 // ceilSeconds converts d to whole seconds, rounding up, for SQL datetime modifiers.

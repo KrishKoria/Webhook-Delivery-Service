@@ -8,57 +8,32 @@ package database
 import (
 	"context"
 	"database/sql"
-	"strings"
 )
 
-const claimScheduledWebhooks = `-- name: ClaimScheduledWebhooks :many
+const claimScheduledWebhook = `-- name: ClaimScheduledWebhook :one
 UPDATE scheduled_webhooks
 SET status = 'enqueued', updated_at = CURRENT_TIMESTAMP
-WHERE status = 'pending' AND id IN (/*SLICE:ids*/?)
+WHERE id = ?1 AND status = 'pending' AND scheduled_for <= CURRENT_TIMESTAMP
 RETURNING id, subscription_id, payload, scheduled_for, recurrence, status, created_at, updated_at
 `
 
-// Only rows still pending are returned, so concurrent schedulers never fire a row twice.
-func (q *Queries) ClaimScheduledWebhooks(ctx context.Context, ids []string) ([]ScheduledWebhook, error) {
-	query := claimScheduledWebhooks
-	var queryParams []interface{}
-	if len(ids) > 0 {
-		for _, v := range ids {
-			queryParams = append(queryParams, v)
-		}
-		query = strings.Replace(query, "/*SLICE:ids*/?", strings.Repeat(",?", len(ids))[1:], 1)
-	} else {
-		query = strings.Replace(query, "/*SLICE:ids*/?", "NULL", 1)
-	}
-	rows, err := q.db.QueryContext(ctx, query, queryParams...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ScheduledWebhook
-	for rows.Next() {
-		var i ScheduledWebhook
-		if err := rows.Scan(
-			&i.ID,
-			&i.SubscriptionID,
-			&i.Payload,
-			&i.ScheduledFor,
-			&i.Recurrence,
-			&i.Status,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+// Claims one due row inside the transaction that enqueues its delivery task.
+// Returns no row when another scheduler already won it; a rolled-back
+// transaction leaves the row pending, so the next tick retries it.
+func (q *Queries) ClaimScheduledWebhook(ctx context.Context, id string) (ScheduledWebhook, error) {
+	row := q.db.QueryRowContext(ctx, claimScheduledWebhook, id)
+	var i ScheduledWebhook
+	err := row.Scan(
+		&i.ID,
+		&i.SubscriptionID,
+		&i.Payload,
+		&i.ScheduledFor,
+		&i.Recurrence,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const countScheduledWebhooksByStatus = `-- name: CountScheduledWebhooksByStatus :one

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
@@ -48,8 +49,8 @@ func TestEnqueueIdempotencyKey(t *testing.T) {
 func TestRetryDLQIsAtomicUnderConcurrency(t *testing.T) {
 	o, q, conn := setup(t)
 	ctx := context.Background()
-	exec(t, conn, `INSERT INTO dead_letter_tasks (id, original_task_id, subscription_id, payload, reason, status, event_type)
-		VALUES ('d1', 't0', 's1', '{}', 'boom', 'dead', 'order.created')`)
+	exec(t, conn, `INSERT INTO dead_letter_tasks (id, original_task_id, subscription_id, payload, reason, status, event_type, error_details)
+		VALUES ('d1', 't0', 's1', '{}', 'boom', 'dead', 'order.created', '500 Internal Server Error: db timeout')`)
 
 	var wg sync.WaitGroup
 	results := make([]error, 8)
@@ -84,6 +85,10 @@ func TestRetryDLQIsAtomicUnderConcurrency(t *testing.T) {
 	row, err := q.GetDeadLetterTask(ctx, "d1")
 	if err != nil || row.Status != "retried" {
 		t.Fatalf("dlq row status = %q err=%v", row.Status, err)
+	}
+	// The original failure must survive the retry note.
+	if d := row.ErrorDetails.String; !strings.HasPrefix(d, "500 Internal Server Error: db timeout") || !strings.HasSuffix(d, "test") {
+		t.Fatalf("error_details after retry = %q", d)
 	}
 }
 

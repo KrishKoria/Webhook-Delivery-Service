@@ -650,7 +650,8 @@ func (q *Queries) APIListRetryingTasks(ctx context.Context, lim int64) ([]APILis
 const aPIListScheduled = `-- name: APIListScheduled :many
 SELECT id, subscription_id, payload, scheduled_for, recurrence, status, created_at, updated_at FROM scheduled_webhooks
 WHERE (CAST(?1 AS TEXT) IS NULL OR subscription_id = CAST(?1 AS TEXT))
-  AND (CAST(?2 AS TEXT) IS NULL OR status = CAST(?2 AS TEXT))
+  AND (CAST(?2 AS TEXT) IS NULL OR status = CAST(?2 AS TEXT)
+       OR (CAST(?2 AS TEXT) = 'enqueued' AND status = 'delivered'))
   AND (CAST(?3 AS TEXT) IS NULL
        OR scheduled_for < CAST(?3 AS TEXT)
        OR (scheduled_for = CAST(?3 AS TEXT) AND id < CAST(?4 AS TEXT)))
@@ -666,6 +667,7 @@ type APIListScheduledParams struct {
 	Lim            int64
 }
 
+// Filtering by 'enqueued' also matches legacy 'delivered' rows.
 func (q *Queries) APIListScheduled(ctx context.Context, arg APIListScheduledParams) ([]ScheduledWebhook, error) {
 	rows, err := q.db.QueryContext(ctx, aPIListScheduled,
 		arg.SubscriptionID,

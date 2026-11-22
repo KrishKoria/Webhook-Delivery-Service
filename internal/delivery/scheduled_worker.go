@@ -3,6 +3,7 @@ package delivery
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -62,65 +63,74 @@ func (w *ScheduledWorker) Start(ctx context.Context) {
 	}
 }
 
-// runOnce processes due rows, batch after batch, until fewer than a full batch is due.
+// runOnce processes due rows, batch after batch, while every row in a full
+// batch fires. A failed or contended row ends the pass so a persistent error
+// cannot spin; it stays pending and is retried on the next tick.
 func (w *ScheduledWorker) runOnce(ctx context.Context) {
 	for ctx.Err() == nil {
-		n, err := w.processBatch(context.WithoutCancel(ctx))
+		fired, err := w.processBatch(context.WithoutCancel(ctx))
 		if err != nil {
 			w.log.Error("process scheduled webhooks", "err", err)
 			return
 		}
-		if n < scheduledBatchSize {
+		if fired < scheduledBatchSize {
 			return
 		}
 	}
 }
 
-// processBatch claims up to one batch of due rows and fires each one.
+// processBatch fires up to one batch of due rows and returns how many it fired.
 func (w *ScheduledWorker) processBatch(ctx context.Context) (int, error) {
-	rows, err := w.claimDue(ctx, scheduledBatchSize)
+	ids, err := w.dueIDs(ctx, scheduledBatchSize)
 	if err != nil {
 		return 0, err
 	}
-	for _, row := range rows {
-		w.fire(ctx, row)
+	fired := 0
+	for _, id := range ids {
+		if w.fire(ctx, id) {
+			fired++
+		}
 	}
-	return len(rows), nil
+	return fired, nil
 }
 
-// claimDue atomically moves up to limit due rows from pending to enqueued and
-// returns the rows this call won.
-func (w *ScheduledWorker) claimDue(ctx context.Context, limit int) ([]database.ScheduledWebhook, error) {
+// dueIDs lists up to limit pending rows whose time has come.
+func (w *ScheduledWorker) dueIDs(ctx context.Context, limit int) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, dbOpTimeout)
 	defer cancel()
 	ids, err := w.q.SelectDueScheduledWebhookIDs(ctx, int64(limit))
 	if err != nil {
 		return nil, fmt.Errorf("select due scheduled webhooks: %w", err)
 	}
-	if len(ids) == 0 {
-		return nil, nil
-	}
-	rows, err := w.q.ClaimScheduledWebhooks(ctx, ids)
-	if err != nil {
-		return nil, fmt.Errorf("claim scheduled webhooks: %w", err)
-	}
-	return rows, nil
+	return ids, nil
 }
 
-// fire enqueues the delivery task and the next occurrence in one transaction.
-// If that fails, the claimed row is marked failed so it is visible to operators.
-func (w *ScheduledWorker) fire(ctx context.Context, row database.ScheduledWebhook) {
-	log := w.log.With("scheduled_id", row.ID, "subscription_id", row.SubscriptionID)
-	recurrence := row.Recurrence.String
-	next, skipped, recurring := nextOccurrence(row.ScheduledFor, recurrence, w.now())
-	if !recurring && recurrence != "" && recurrence != "none" {
-		log.Warn("unknown recurrence; treating as one-off", "recurrence", recurrence)
-	}
-
+// fire claims one row and enqueues its delivery task and next occurrence in a
+// single transaction. Any failure rolls the claim back, leaving the row pending
+// for the next tick, so a transient error can neither lose an occurrence nor
+// end a recurring chain. It reports whether this call fired the row.
+func (w *ScheduledWorker) fire(ctx context.Context, id string) bool {
+	log := w.log.With("scheduled_id", id)
 	taskID := uuid.NewString()
+	var (
+		row                database.ScheduledWebhook
+		next               time.Time
+		skipped            int
+		recurring, claimed bool
+	)
 	txCtx, cancel := context.WithTimeout(ctx, dbOpTimeout)
 	defer cancel()
 	err := db.WithTx(txCtx, w.db, func(q *database.Queries) error {
+		var err error
+		row, err = q.ClaimScheduledWebhook(txCtx, id)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil // another scheduler won it, or it was cancelled
+		}
+		if err != nil {
+			return fmt.Errorf("claim: %w", err)
+		}
+		claimed = true
+		next, skipped, recurring = nextOccurrence(row.ScheduledFor, row.Recurrence.String, w.now())
 		if err := q.CreateDeliveryTask(txCtx, database.CreateDeliveryTaskParams{
 			ID:             taskID,
 			SubscriptionID: row.SubscriptionID,
@@ -143,18 +153,17 @@ func (w *ScheduledWorker) fire(ctx context.Context, row database.ScheduledWebhoo
 		return nil
 	})
 	if err != nil {
-		log.Error("fire scheduled webhook", "err", err)
-		markCtx, markCancel := context.WithTimeout(ctx, dbOpTimeout)
-		defer markCancel()
-		if mErr := w.q.UpdateScheduledWebhookStatus(markCtx, database.UpdateScheduledWebhookStatusParams{
-			Status: ScheduledFailed,
-			ID:     row.ID,
-		}); mErr != nil {
-			log.Error("mark scheduled webhook failed", "err", mErr)
-		}
-		return
+		log.Error("fire scheduled webhook; will retry next tick", "err", err)
+		return false
+	}
+	if !claimed {
+		return false
 	}
 
+	log = log.With("subscription_id", row.SubscriptionID)
+	if rec := row.Recurrence.String; !recurring && rec != "" && rec != "none" {
+		log.Warn("unknown recurrence; treated as one-off", "recurrence", rec)
+	}
 	attrs := []any{"task_id", taskID}
 	if recurring {
 		attrs = append(attrs, "next_occurrence", next.UTC())
@@ -163,6 +172,7 @@ func (w *ScheduledWorker) fire(ctx context.Context, row database.ScheduledWebhoo
 		log.Warn("missed recurrences skipped", append(attrs, "skipped", skipped)...)
 	}
 	log.Info("scheduled webhook enqueued", attrs...)
+	return true
 }
 
 // nextOccurrence returns the first occurrence of recurrence after base that is

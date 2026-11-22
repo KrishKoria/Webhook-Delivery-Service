@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"database/sql"
@@ -102,21 +103,13 @@ func (h *WebhookHandler) IngestWebhook(c *gin.Context) {
 	RespondSuccess(c, http.StatusAccepted, gin.H{"task_id": taskID})
 }
 
-// subscription loads a subscription through the cache when one is configured.
+// subscription loads a subscription through the cache. GetOrLoad's version
+// check stops a read that raced an update or pause from writing the stale row
+// back into Redis after the update invalidated it (a nil cache just loads).
 func (h *WebhookHandler) subscription(c *gin.Context, id string) (database.Subscription, error) {
-	if h.Cache != nil {
-		if sub, ok := h.Cache.Get(id); ok {
-			return sub, nil
-		}
-	}
-	sub, err := h.Queries.GetSubscription(c.Request.Context(), id)
-	if err != nil {
-		return database.Subscription{}, err
-	}
-	if h.Cache != nil {
-		h.Cache.Set(id, sub)
-	}
-	return sub, nil
+	return h.Cache.GetOrLoad(c.Request.Context(), id, func(ctx context.Context) (database.Subscription, error) {
+		return h.Queries.GetSubscription(ctx, id)
+	})
 }
 
 // verifySignature checks an inbound "sha256=<hex HMAC-SHA256(secret, body)>" header in constant time.

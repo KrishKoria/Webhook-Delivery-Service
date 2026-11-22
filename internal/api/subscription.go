@@ -4,7 +4,7 @@ import (
 	"cmp"
 	"crypto/rand"
 	"database/sql"
-	"encoding/hex"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -182,10 +182,10 @@ func (h *SubscriptionHandler) respondSubscription(c *gin.Context, status int, id
 }
 
 type updateSubscriptionRequest struct {
-	TargetURL  string  `json:"target_url"`
-	EventTypes string  `json:"event_types"`
-	Secret     *string `json:"secret"`       // omitted or "" keeps the current secret
-	ClearSecret bool   `json:"clear_secret"` // true removes the secret
+	TargetURL   string  `json:"target_url"`
+	EventTypes  string  `json:"event_types"`
+	Secret      *string `json:"secret"`       // omitted or "" keeps the current secret
+	ClearSecret bool    `json:"clear_secret"` // true removes the secret
 }
 
 // UpdateSubscription handles PUT /subscriptions/:id. target_url and event_types
@@ -231,35 +231,26 @@ func (h *SubscriptionHandler) DeleteSubscription(c *gin.Context) {
 // returned once, in this response only.
 func (h *SubscriptionHandler) RotateSecret(c *gin.Context) {
 	id := c.Param("id")
-	sub, err := h.Queries.GetSubscription(c.Request.Context(), id)
-	if err != nil {
-		respondDBError(c, "subscription", err)
-		return
-	}
 	secret, err := generateSecureSecret()
 	if err != nil {
 		respondInternal(c, "generate secret", err)
 		return
 	}
-	err = h.Ops.UpdateSubscription(c.Request.Context(), ops.UpdateSubscriptionInput{
-		ID:         id,
-		TargetURL:  sub.TargetUrl,
-		EventTypes: sub.EventTypes.String,
-		Secret:     &secret,
-	})
-	if !h.opsErr(c, "rotate secret", err) {
+	// Only the secret column changes, so a concurrent settings update is never undone.
+	if !h.opsErr(c, "rotate secret", h.Ops.SetSecret(c.Request.Context(), id, secret)) {
 		return
 	}
 	RespondSuccess(c, http.StatusOK, gin.H{"id": id, "secret": secret})
 }
 
-// generateSecureSecret returns 32 random bytes, hex-encoded.
+// generateSecureSecret returns a Standard Webhooks secret: "whsec_" followed
+// by 32 random bytes, base64-encoded.
 func generateSecureSecret() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
-	return hex.EncodeToString(b), nil
+	return "whsec_" + base64.StdEncoding.EncodeToString(b), nil
 }
 
 const (
@@ -283,6 +274,10 @@ func (h *SubscriptionHandler) TestSend(c *gin.Context) {
 		// A JSON string is taken as the raw payload text; any other JSON value is sent as-is.
 		var s string
 		if json.Unmarshal(req.Payload, &s) == nil {
+			if !json.Valid([]byte(s)) {
+				RespondErrorWithField(c, http.StatusBadRequest, "payload string must contain a JSON document", "payload")
+				return
+			}
 			payload = s
 		} else {
 			payload = string(req.Payload)

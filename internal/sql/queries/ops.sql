@@ -4,7 +4,11 @@ UPDATE dead_letter_tasks
 SET status = 'retried',
     last_attempt_at = CURRENT_TIMESTAMP,
     attempt_count = attempt_count + 1,
-    error_details = sqlc.arg(note)
+    -- Append the retry note; the original failure stays readable.
+    error_details = CASE
+        WHEN error_details IS NULL OR error_details = '' THEN sqlc.arg(note)
+        ELSE error_details || char(10) || sqlc.arg(note)
+    END
 WHERE id = sqlc.arg(id) AND status = 'dead'
 RETURNING *;
 
@@ -22,6 +26,11 @@ WHERE subscription_id = ? AND idempotency_key = ?;
 -- name: SetSubscriptionPaused :execrows
 UPDATE subscriptions
 SET paused = sqlc.arg(paused), updated_at = CURRENT_TIMESTAMP
+WHERE id = sqlc.arg(id);
+
+-- name: SetSubscriptionSecret :execrows
+UPDATE subscriptions
+SET secret = sqlc.arg(secret), updated_at = CURRENT_TIMESTAMP
 WHERE id = sqlc.arg(id);
 
 -- name: UpdateSubscriptionFields :execrows
