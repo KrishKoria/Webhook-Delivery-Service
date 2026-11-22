@@ -129,6 +129,16 @@ func TestRateLimiter_Concurrent(t *testing.T) {
 	}
 }
 
+// A bucket must never lose tokens to a clock reading older than its last refill
+// (CI failure under -race: a new key's first request was rejected).
+func TestTokenBucket_StaleClockDoesNotDrain(t *testing.T) {
+	now := time.Now()
+	b := newTokenBucketAt(1, 1, now)
+	if ok, _ := b.take(now.Add(-time.Millisecond)); !ok {
+		t.Fatal("full bucket rejected a request stamped before its creation")
+	}
+}
+
 func TestRateLimitMiddleware_Returns429(t *testing.T) {
 	config := RateLimitConfig{
 		RequestsPerSecond: 1,
