@@ -1,323 +1,348 @@
 package api
 
 import (
+	"cmp"
 	"crypto/rand"
 	"database/sql"
-	"encoding/hex"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
+	"strings"
+	"time"
 
-	"github.com/KrishKoria/Webhook-Delivery-Service/internal/cache"
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/database"
+	"github.com/KrishKoria/Webhook-Delivery-Service/internal/delivery"
+	"github.com/KrishKoria/Webhook-Delivery-Service/internal/ops"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
 
+// SubscriptionHandler serves the subscription admin API.
 type SubscriptionHandler struct {
-    Queries *database.Queries
-    Cache   *cache.RedisSubscriptionCache
+	Queries *database.Queries
+	Ops     *ops.Ops
+	// AllowPrivateTargets skips the SSRF (private/loopback address) check on
+	// target URLs. Set from WEBHOOK_ALLOW_PRIVATE_IPS for local development only.
+	AllowPrivateTargets bool
 }
 
-// SubscriptionResponse is the API response for subscriptions (secrets redacted).
+// SubscriptionResponse is the API view of a subscription. The secret is never returned.
 type SubscriptionResponse struct {
-    ID         string `json:"id"`
-    TargetURL  string `json:"target_url"`
-    EventTypes string `json:"event_types,omitempty"`
-    HasSecret  bool   `json:"has_secret"`
-    CreatedAt  string `json:"created_at,omitempty"`
+	ID         string `json:"id"`
+	TargetURL  string `json:"target_url"`
+	EventTypes string `json:"event_types,omitempty"`
+	HasSecret  bool   `json:"has_secret"`
+	Paused     bool   `json:"paused"`
+	CreatedAt  string `json:"created_at,omitempty"`
+	UpdatedAt  string `json:"updated_at,omitempty"`
 }
 
-// toSubscriptionResponse converts a database subscription to an API response with secret redacted.
 func toSubscriptionResponse(sub database.Subscription) SubscriptionResponse {
-    return SubscriptionResponse{
-        ID:         sub.ID,
-        TargetURL:  sub.TargetUrl,
-        EventTypes: sub.EventTypes.String,
-        HasSecret:  sub.Secret.Valid && sub.Secret.String != "",
-        CreatedAt:  sub.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-    }
+	r := SubscriptionResponse{
+		ID:         sub.ID,
+		TargetURL:  sub.TargetUrl,
+		EventTypes: sub.EventTypes.String,
+		HasSecret:  sub.Secret.Valid && sub.Secret.String != "",
+		Paused:     sub.Paused != 0,
+	}
+	if !sub.CreatedAt.IsZero() {
+		r.CreatedAt = ts(sub.CreatedAt)
+	}
+	if !sub.UpdatedAt.IsZero() {
+		r.UpdatedAt = ts(sub.UpdatedAt)
+	}
+	return r
 }
 
-// validateTargetURL validates that a URL is a valid HTTP/HTTPS URL.
-func validateTargetURL(targetURL string) error {
-    if targetURL == "" {
-        return &ValidationError{Field: "target_url", Message: "target_url is required"}
-    }
-    u, err := url.Parse(targetURL)
-    if err != nil {
-        return &ValidationError{Field: "target_url", Message: "invalid URL format"}
-    }
-    if u.Scheme != "http" && u.Scheme != "https" {
-        return &ValidationError{Field: "target_url", Message: "URL scheme must be http or https"}
-    }
-    if u.Host == "" {
-        return &ValidationError{Field: "target_url", Message: "URL must have a host"}
-    }
-    return nil
-}
-
-// ValidationError represents a field validation error.
+// ValidationError is a field-level validation failure.
 type ValidationError struct {
-    Field   string
-    Message string
+	Field   string
+	Message string
 }
 
-func (e *ValidationError) Error() string {
-    return e.Message
+func (e *ValidationError) Error() string { return e.Message }
+
+// validateTargetURL checks that a URL is an absolute http(s) URL with a host.
+func validateTargetURL(targetURL string) error {
+	if targetURL == "" {
+		return &ValidationError{Field: "target_url", Message: "target_url is required"}
+	}
+	u, err := url.Parse(targetURL)
+	if err != nil {
+		return &ValidationError{Field: "target_url", Message: "invalid URL format"}
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return &ValidationError{Field: "target_url", Message: "URL scheme must be http or https"}
+	}
+	if u.Host == "" {
+		return &ValidationError{Field: "target_url", Message: "URL must have a host"}
+	}
+	return nil
 }
 
-func RegisterSubscriptionRoutes(r *gin.Engine, h *SubscriptionHandler) {
-    r.POST("/subscriptions", h.CreateSubscription)
-    r.GET("/subscriptions", h.ListSubscriptions)
-    r.GET("/subscriptions/:id", h.GetSubscription)
-    r.PUT("/subscriptions/:id", h.UpdateSubscription)
-    r.DELETE("/subscriptions/:id", h.DeleteSubscription)
-    r.POST("/subscriptions/:id/rotate-secret", h.RotateSecret)
-    r.POST("/subscriptions/:id/test-send", h.TestSend)
+// checkTarget validates shape and, unless private targets are allowed, rejects
+// URLs that resolve to private, loopback or link-local addresses (SSRF).
+// It answers 400 itself and returns false on failure.
+func (h *SubscriptionHandler) checkTarget(c *gin.Context, target string) bool {
+	if err := validateTargetURL(target); err != nil {
+		var ve *ValidationError
+		errors.As(err, &ve)
+		RespondErrorWithField(c, http.StatusBadRequest, ve.Message, ve.Field)
+		return false
+	}
+	if !h.AllowPrivateTargets {
+		if err := delivery.ValidateTargetURL(target); err != nil {
+			RespondErrorWithField(c, http.StatusBadRequest, "target_url is not an allowed public address", "target_url")
+			return false
+		}
+	}
+	return true
 }
 
-// RegisterSubscriptionRoutesGroup registers subscription routes on a RouterGroup (for middleware).
+// RegisterSubscriptionRoutesGroup registers subscription routes under both the
+// legacy /subscriptions prefix and /api/subscriptions.
 func RegisterSubscriptionRoutesGroup(rg *gin.RouterGroup, h *SubscriptionHandler) {
-    rg.POST("/subscriptions", h.CreateSubscription)
-    rg.GET("/subscriptions", h.ListSubscriptions)
-    rg.GET("/subscriptions/:id", h.GetSubscription)
-    rg.PUT("/subscriptions/:id", h.UpdateSubscription)
-    rg.DELETE("/subscriptions/:id", h.DeleteSubscription)
-    rg.POST("/subscriptions/:id/rotate-secret", h.RotateSecret)
-    rg.POST("/subscriptions/:id/test-send", h.TestSend)
+	for _, p := range []string{"/subscriptions", "/api/subscriptions"} {
+		rg.POST(p, h.CreateSubscription)
+		rg.GET(p, h.ListSubscriptions)
+		rg.GET(p+"/:id", h.GetSubscription)
+		rg.PUT(p+"/:id", h.UpdateSubscription)
+		rg.DELETE(p+"/:id", h.DeleteSubscription)
+		rg.POST(p+"/:id/rotate-secret", h.RotateSecret)
+		rg.POST(p+"/:id/test-send", h.TestSend)
+		rg.POST(p+"/:id/pause", h.PauseSubscription)
+		rg.POST(p+"/:id/resume", h.ResumeSubscription)
+	}
 }
-// CreateSubscription handles POST /subscriptions
+
+type createSubscriptionRequest struct {
+	TargetURL  string `json:"target_url"`
+	Secret     string `json:"secret"`
+	EventTypes string `json:"event_types"` // comma-separated allowlist; empty accepts all
+}
+
+// CreateSubscription handles POST /subscriptions.
 func (h *SubscriptionHandler) CreateSubscription(c *gin.Context) {
-    var req struct {
-        TargetUrl  string `json:"target_url" binding:"required"`
-        Secret     string `json:"secret"`
-        EventTypes string `json:"event_types"` // comma-separated
-    }
-    if err := c.ShouldBindJSON(&req); err != nil {
-        RespondValidationError(c, err.Error())
-        return
-    }
-
-    // Validate target URL
-    if err := validateTargetURL(req.TargetUrl); err != nil {
-        if ve, ok := err.(*ValidationError); ok {
-            RespondErrorWithField(c, http.StatusBadRequest, ve.Message, ve.Field)
-            return
-        }
-        RespondValidationError(c, err.Error())
-        return
-    }
-
-    id := uuid.New().String()
-    err := h.Queries.CreateSubscription(c, database.CreateSubscriptionParams{
-        ID:         id,
-        TargetUrl:  req.TargetUrl,
-        Secret:     sql.NullString{String: req.Secret, Valid: req.Secret != ""},
-        EventTypes: sql.NullString{String: req.EventTypes, Valid: req.EventTypes != ""},
-    })
-    if err != nil {
-        RespondInternalError(c)
-        return
-    }
-    RespondSuccess(c, http.StatusCreated, gin.H{"id": id})
+	var req createSubscriptionRequest
+	if !bindJSON(c, &req, false) {
+		return
+	}
+	req.TargetURL = strings.TrimSpace(req.TargetURL)
+	if !h.checkTarget(c, req.TargetURL) {
+		return
+	}
+	id := uuid.NewString()
+	eventTypes := normalizeEventTypes(req.EventTypes)
+	err := h.Queries.CreateSubscription(c.Request.Context(), database.CreateSubscriptionParams{
+		ID:         id,
+		TargetUrl:  req.TargetURL,
+		Secret:     sql.NullString{String: req.Secret, Valid: req.Secret != ""},
+		EventTypes: sql.NullString{String: eventTypes, Valid: eventTypes != ""},
+	})
+	if err != nil {
+		respondInternal(c, "create subscription", err)
+		return
+	}
+	h.respondSubscription(c, http.StatusCreated, id)
 }
 
-// ListSubscriptions handles GET /subscriptions
+// ListSubscriptions handles GET /subscriptions?limit=&cursor=.
 func (h *SubscriptionHandler) ListSubscriptions(c *gin.Context) {
-    subs, err := h.Queries.ListSubscriptions(c)
-    if err != nil {
-        RespondInternalError(c)
-        return
-    }
-
-    // Redact secrets from response
-    response := make([]SubscriptionResponse, len(subs))
-    for i, sub := range subs {
-        response[i] = toSubscriptionResponse(sub)
-    }
-    RespondSuccess(c, http.StatusOK, response)
+	limit, cur, ok := pageParams(c)
+	if !ok {
+		return
+	}
+	curTS, curID := cur.params()
+	subs, err := h.Queries.APIListSubscriptions(c.Request.Context(), database.APIListSubscriptionsParams{
+		CursorTs: curTS, CursorID: curID, Lim: int64(limit + 1),
+	})
+	if err != nil {
+		respondInternal(c, "list subscriptions", err)
+		return
+	}
+	RespondSuccess(c, http.StatusOK, pageOf(subs, limit,
+		func(s database.Subscription) (time.Time, string) { return s.CreatedAt, s.ID },
+		toSubscriptionResponse))
 }
 
-// GetSubscription handles GET /subscriptions/:id
+// GetSubscription handles GET /subscriptions/:id.
 func (h *SubscriptionHandler) GetSubscription(c *gin.Context) {
-    id := c.Param("id")
-    sub, err := h.Queries.GetSubscription(c, id)
-    if err != nil {
-        RespondNotFound(c, "subscription")
-        return
-    }
-    // Return response with secret redacted
-    RespondSuccess(c, http.StatusOK, toSubscriptionResponse(sub))
+	h.respondSubscription(c, http.StatusOK, c.Param("id"))
 }
 
-// UpdateSubscription handles PUT /subscriptions/:id
+func (h *SubscriptionHandler) respondSubscription(c *gin.Context, status int, id string) {
+	sub, err := h.Queries.GetSubscription(c.Request.Context(), id)
+	if err != nil {
+		respondDBError(c, "subscription", err)
+		return
+	}
+	RespondSuccess(c, status, toSubscriptionResponse(sub))
+}
+
+type updateSubscriptionRequest struct {
+	TargetURL   string  `json:"target_url"`
+	EventTypes  string  `json:"event_types"`
+	Secret      *string `json:"secret"`       // omitted or "" keeps the current secret
+	ClearSecret bool    `json:"clear_secret"` // true removes the secret
+}
+
+// UpdateSubscription handles PUT /subscriptions/:id. target_url and event_types
+// are replaced; the secret is kept unless a new one is given or clear_secret is true.
 func (h *SubscriptionHandler) UpdateSubscription(c *gin.Context) {
-    id := c.Param("id")
-    var req struct {
-        TargetURL string `json:"target_url" binding:"required"`
-        Secret    string `json:"secret"`
-        EventTypes string `json:"event_types"` 
-    }
-    if err := c.ShouldBindJSON(&req); err != nil {
-        RespondValidationError(c, err.Error())
-        return
-    }
-
-    // Validate target URL
-    if err := validateTargetURL(req.TargetURL); err != nil {
-        if ve, ok := err.(*ValidationError); ok {
-            RespondErrorWithField(c, http.StatusBadRequest, ve.Message, ve.Field)
-            return
-        }
-        RespondValidationError(c, err.Error())
-        return
-    }
-
-    // Check subscription exists before updating
-    if _, err := h.Queries.GetSubscription(c, id); err != nil {
-        RespondNotFound(c, "subscription")
-        return
-    }
-
-    arg := database.UpdateSubscriptionParams{
-        TargetUrl: req.TargetURL,
-        EventTypes: sql.NullString{
-            String: req.EventTypes,
-            Valid:  req.EventTypes != "",
-        },
-		Secret: sql.NullString{
-			String: req.Secret,
-			Valid:  req.Secret != "",
-		},
-        ID:        id,
-    }
-    if err := h.Queries.UpdateSubscription(c, arg); err != nil {
-        RespondInternalError(c)
-        return
-    }
-    if h.Cache != nil {
-        h.Cache.Del(id)
-    }
-    c.Status(http.StatusNoContent)
+	var req updateSubscriptionRequest
+	if !bindJSON(c, &req, false) {
+		return
+	}
+	req.TargetURL = strings.TrimSpace(req.TargetURL)
+	if !h.checkTarget(c, req.TargetURL) {
+		return
+	}
+	if req.ClearSecret && req.Secret != nil && *req.Secret != "" {
+		RespondErrorWithField(c, http.StatusBadRequest, "secret and clear_secret cannot both be set", "clear_secret")
+		return
+	}
+	id := c.Param("id")
+	err := h.Ops.UpdateSubscription(c.Request.Context(), ops.UpdateSubscriptionInput{
+		ID:          id,
+		TargetURL:   req.TargetURL,
+		EventTypes:  normalizeEventTypes(req.EventTypes),
+		Secret:      req.Secret,
+		ClearSecret: req.ClearSecret,
+	})
+	if !h.opsErr(c, "update subscription", err) {
+		return
+	}
+	h.respondSubscription(c, http.StatusOK, id)
 }
 
-// DeleteSubscription handles DELETE /subscriptions/:id
+// DeleteSubscription handles DELETE /subscriptions/:id and removes its tasks,
+// logs, DLQ entries and schedules.
 func (h *SubscriptionHandler) DeleteSubscription(c *gin.Context) {
-    id := c.Param("id")
-
-    // Check subscription exists before deleting
-    if _, err := h.Queries.GetSubscription(c, id); err != nil {
-        RespondNotFound(c, "subscription")
-        return
-    }
-
-    if err := h.Queries.DeleteSubscription(c, id); err != nil {
-        RespondInternalError(c)
-        return
-    }
-    if h.Cache != nil {
-        h.Cache.Del(id)
-    }
-    c.Status(http.StatusNoContent)
+	err := h.Ops.DeleteSubscription(c.Request.Context(), c.Param("id"))
+	if !h.opsErr(c, "delete subscription", err) {
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
-// RotateSecret handles POST /subscriptions/:id/rotate-secret
-// This endpoint generates a new secret and returns it (the only time the secret is visible).
+// RotateSecret handles POST /subscriptions/:id/rotate-secret. The new secret is
+// returned once, in this response only.
 func (h *SubscriptionHandler) RotateSecret(c *gin.Context) {
-    id := c.Param("id")
-
-    // Check subscription exists
-    sub, err := h.Queries.GetSubscription(c, id)
-    if err != nil {
-        RespondNotFound(c, "subscription")
-        return
-    }
-
-    // Generate a new secure secret (32 bytes = 64 hex chars)
-    newSecret := generateSecureSecret()
-
-    // Update the subscription with the new secret
-    arg := database.UpdateSubscriptionParams{
-        TargetUrl:  sub.TargetUrl,
-        Secret:     sql.NullString{String: newSecret, Valid: true},
-        EventTypes: sub.EventTypes,
-        ID:         id,
-    }
-    if err := h.Queries.UpdateSubscription(c, arg); err != nil {
-        RespondInternalError(c)
-        return
-    }
-
-    // Invalidate cache
-    if h.Cache != nil {
-        h.Cache.Del(id)
-    }
-
-    // Return the new secret (this is the ONLY time it should be visible)
-    RespondSuccess(c, http.StatusOK, gin.H{
-        "id":     id,
-        "secret": newSecret,
-    })
+	id := c.Param("id")
+	secret, err := generateSecureSecret()
+	if err != nil {
+		respondInternal(c, "generate secret", err)
+		return
+	}
+	// Only the secret column changes, so a concurrent settings update is never undone.
+	if !h.opsErr(c, "rotate secret", h.Ops.SetSecret(c.Request.Context(), id, secret)) {
+		return
+	}
+	RespondSuccess(c, http.StatusOK, gin.H{"id": id, "secret": secret})
 }
 
-// generateSecureSecret generates a cryptographically secure random secret.
-func generateSecureSecret() string {
-    b := make([]byte, 32)
-    if _, err := rand.Read(b); err != nil {
-        // Fallback to UUID if crypto/rand fails (should never happen)
-        return uuid.New().String()
-    }
-    return hex.EncodeToString(b)
+// generateSecureSecret returns a Standard Webhooks secret: "whsec_" followed
+// by 32 random bytes, base64-encoded.
+func generateSecureSecret() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return "whsec_" + base64.StdEncoding.EncodeToString(b), nil
 }
 
-// TestSend handles POST /subscriptions/:id/test-send
-// This endpoint allows admins to trigger a test delivery for a subscription.
+const (
+	defaultTestPayload   = `{"event":"test","source":"admin_test_send"}`
+	defaultTestEventType = "test"
+)
+
+// TestSend handles POST /subscriptions/:id/test-send with an optional
+// {"payload": <JSON>, "event_type": "..."} body. Signature checks and the event
+// allowlist are bypassed because the admin initiated it.
 func (h *SubscriptionHandler) TestSend(c *gin.Context) {
-    id := c.Param("id")
+	var req struct {
+		Payload   json.RawMessage `json:"payload"`
+		EventType string          `json:"event_type"`
+	}
+	if !bindJSON(c, &req, true) {
+		return
+	}
+	payload := defaultTestPayload
+	if len(req.Payload) > 0 && string(req.Payload) != "null" {
+		// A JSON string is taken as the raw payload text; any other JSON value is sent as-is.
+		var s string
+		if json.Unmarshal(req.Payload, &s) == nil {
+			if !json.Valid([]byte(s)) {
+				RespondErrorWithField(c, http.StatusBadRequest, "payload string must contain a JSON document", "payload")
+				return
+			}
+			payload = s
+		} else {
+			payload = string(req.Payload)
+		}
+	}
+	eventType := cmp.Or(req.EventType, defaultTestEventType)
 
-    var req struct {
-        Payload   string `json:"payload"`
-        EventType string `json:"event_type"`
-    }
-    // Allow empty body - defaults will be used
-    _ = c.ShouldBindJSON(&req)
+	id := c.Param("id")
+	if _, err := h.Queries.GetSubscription(c.Request.Context(), id); err != nil {
+		respondDBError(c, "subscription", err)
+		return
+	}
+	taskID, _, err := h.Ops.Enqueue(c.Request.Context(), ops.EnqueueInput{
+		SubscriptionID: id, Payload: payload, EventType: eventType,
+	})
+	if err != nil {
+		respondInternal(c, "test-send enqueue", err)
+		return
+	}
+	RespondSuccess(c, http.StatusAccepted, gin.H{"task_id": taskID, "subscription_id": id, "status": "queued"})
+}
 
-    // Set defaults if not provided
-    if req.Payload == "" {
-        req.Payload = `{"event":"test","source":"admin_test_send"}`
-    }
-    if req.EventType == "" {
-        req.EventType = "test"
-    }
+// PauseSubscription handles POST /subscriptions/:id/pause. Ingest keeps
+// accepting events; the worker holds deliveries until resumed.
+func (h *SubscriptionHandler) PauseSubscription(c *gin.Context) { h.setPaused(c, true) }
 
-    // Check subscription exists
-    _, err := h.Queries.GetSubscription(c, id)
-    if err != nil {
-        RespondNotFound(c, "subscription")
-        return
-    }
+// ResumeSubscription handles POST /subscriptions/:id/resume.
+func (h *SubscriptionHandler) ResumeSubscription(c *gin.Context) { h.setPaused(c, false) }
 
-    // Create delivery task (bypasses signature verification for admin-initiated tests)
-    taskID := uuid.New().String()
-    err = h.Queries.CreateDeliveryTask(c, database.CreateDeliveryTaskParams{
-        ID:             taskID,
-        SubscriptionID: id,
-        Payload:        req.Payload,
-    })
-    if err != nil {
-        RespondInternalError(c)
-        return
-    }
+func (h *SubscriptionHandler) setPaused(c *gin.Context, paused bool) {
+	id := c.Param("id")
+	if !h.opsErr(c, "set paused", h.Ops.SetPaused(c.Request.Context(), id, paused)) {
+		return
+	}
+	h.respondSubscription(c, http.StatusOK, id)
+}
 
-    // Invalidate cache if needed
-    if h.Cache != nil {
-        h.Cache.Del(id)
-    }
+// opsErr maps an ops error to a response. It returns true when err is nil.
+func (h *SubscriptionHandler) opsErr(c *gin.Context, msg string, err error) bool {
+	return respondOpsErr(c, "subscription", msg, err)
+}
 
-    // Return success without exposing any secrets
-    RespondSuccess(c, http.StatusAccepted, gin.H{
-        "task_id":         taskID,
-        "subscription_id": id,
-        "status":          "queued",
-    })
+// respondOpsErr maps ops.ErrNotFound → 404, ops.ErrConflict → 409, other → 500.
+// It returns true when err is nil.
+func respondOpsErr(c *gin.Context, resource, msg string, err error) bool {
+	switch {
+	case err == nil:
+		return true
+	case errors.Is(err, ops.ErrNotFound), errors.Is(err, sql.ErrNoRows):
+		RespondNotFound(c, resource)
+	case errors.Is(err, ops.ErrConflict):
+		RespondError(c, http.StatusConflict, resource+" is not in a state that allows this action", ErrCodeConflict)
+	default:
+		respondInternal(c, msg, err)
+	}
+	return false
+}
+
+// normalizeEventTypes trims each comma-separated entry and drops empties.
+func normalizeEventTypes(s string) string {
+	var parts []string
+	for p := range strings.SplitSeq(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			parts = append(parts, p)
+		}
+	}
+	return strings.Join(parts, ",")
 }

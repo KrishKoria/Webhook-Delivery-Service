@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -127,6 +129,16 @@ func TestRateLimiter_Concurrent(t *testing.T) {
 	}
 }
 
+// A bucket must never lose tokens to a clock reading older than its last refill
+// (CI failure under -race: a new key's first request was rejected).
+func TestTokenBucket_StaleClockDoesNotDrain(t *testing.T) {
+	now := time.Now()
+	b := newTokenBucketAt(1, 1, now)
+	if ok, _ := b.take(now.Add(-time.Millisecond)); !ok {
+		t.Fatal("full bucket rejected a request stamped before its creation")
+	}
+}
+
 func TestRateLimitMiddleware_Returns429(t *testing.T) {
 	config := RateLimitConfig{
 		RequestsPerSecond: 1,
@@ -156,6 +168,73 @@ func TestRateLimitMiddleware_Returns429(t *testing.T) {
 	if w2.Code != http.StatusTooManyRequests {
 		t.Errorf("Expected second request to return 429, got %d", w2.Code)
 	}
+	if got := w2.Header().Get("Retry-After"); got != "1" {
+		t.Errorf("Retry-After = %q, want \"1\"", got)
+	}
+}
+
+func TestRateLimiter_CapEvictsFullestBucket(t *testing.T) {
+	limiter := NewRateLimiter(RateLimitConfig{RequestsPerSecond: 0.001, BurstSize: 5, Enabled: true, MaxBuckets: 3})
+	limiter.Allow("a") // 4 tokens left
+	for range 5 {
+		limiter.Allow("drained") // 0 tokens left
+	}
+	limiter.Allow("b") // 4 tokens left
+	limiter.Allow("c") // cap hit: evicts "a" (4 tokens, oldest of the fullest)
+
+	if n := limiter.Len(); n != 3 {
+		t.Fatalf("bucket count = %d, want 3", n)
+	}
+	if limiter.Allow("drained") {
+		t.Error("the drained bucket was evicted; its limit was reset")
+	}
+}
+
+// Flooding the limiter with random keys must not reset a limited key's bucket
+// (code review finding: unvalidated :subscription_id keys evicted real ones).
+func TestRateLimiter_RandomKeyFloodKeepsLimitedBucket(t *testing.T) {
+	limiter := NewRateLimiter(RateLimitConfig{RequestsPerSecond: 0.001, BurstSize: 3, Enabled: true, MaxBuckets: 10})
+	for range 3 {
+		limiter.Allow("victim")
+	}
+	for i := range 1000 {
+		limiter.Allow(fmt.Sprintf("random-%d", i))
+	}
+	if limiter.Allow("victim") {
+		t.Fatal("random-key flood evicted the victim's drained bucket")
+	}
+}
+
+func TestRateLimiter_SweepEvictsIdleBuckets(t *testing.T) {
+	limiter := NewRateLimiter(RateLimitConfig{RequestsPerSecond: 1, BurstSize: 1, Enabled: true, IdleTTL: time.Minute})
+	limiter.Allow("idle")
+	limiter.Allow("busy")
+
+	if n := limiter.Sweep(time.Now()); n != 0 {
+		t.Fatalf("fresh buckets swept: %d", n)
+	}
+	if n := limiter.Sweep(time.Now().Add(2 * time.Minute)); n != 2 {
+		t.Fatalf("swept %d buckets, want 2", n)
+	}
+	if limiter.Len() != 0 {
+		t.Fatalf("expected no buckets after sweep, got %d", limiter.Len())
+	}
+}
+
+func TestRateLimiter_JanitorStopsWithContext(t *testing.T) {
+	limiter := NewRateLimiter(RateLimitConfig{RequestsPerSecond: 1, BurstSize: 1, Enabled: true, IdleTTL: time.Millisecond})
+	ctx, cancel := context.WithCancel(context.Background())
+	limiter.StartJanitor(ctx, time.Millisecond)
+	limiter.Allow("x")
+
+	deadline := time.Now().Add(2 * time.Second)
+	for limiter.Len() != 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("janitor never evicted the idle bucket")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
 }
 
 func TestRateLimitMiddleware_NoSubscriptionID(t *testing.T) {

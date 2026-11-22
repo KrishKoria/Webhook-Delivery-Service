@@ -1,0 +1,510 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-22T05:23:24+00:00",
+  "title": "Design System: Webhook Delivery",
+  "extensions": {
+    "colorMeta": {
+      "canvas": {
+        "role": "neutral",
+        "displayName": "Canvas",
+        "canonical": "oklch(0.982 0.003 300)",
+        "tonalRamp": [
+          "oklch(0.150 0.001 300)",
+          "oklch(0.264 0.002 300)",
+          "oklch(0.379 0.002 300)",
+          "oklch(0.493 0.003 300)",
+          "oklch(0.607 0.003 300)",
+          "oklch(0.721 0.003 300)",
+          "oklch(0.836 0.002 300)",
+          "oklch(0.950 0.002 300)"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Surface",
+        "canonical": "oklch(0.996 0.002 300)",
+        "tonalRamp": [
+          "oklch(0.150 0.001 300)",
+          "oklch(0.264 0.001 300)",
+          "oklch(0.379 0.001 300)",
+          "oklch(0.493 0.002 300)",
+          "oklch(0.607 0.002 300)",
+          "oklch(0.721 0.002 300)",
+          "oklch(0.836 0.001 300)",
+          "oklch(0.950 0.001 300)"
+        ]
+      },
+      "surface-raised": {
+        "role": "neutral",
+        "displayName": "Surface Raised",
+        "canonical": "oklch(0.962 0.005 300)",
+        "tonalRamp": [
+          "oklch(0.150 0.002 300)",
+          "oklch(0.264 0.003 300)",
+          "oklch(0.379 0.004 300)",
+          "oklch(0.493 0.004 300)",
+          "oklch(0.607 0.005 300)",
+          "oklch(0.721 0.004 300)",
+          "oklch(0.836 0.004 300)",
+          "oklch(0.950 0.003 300)"
+        ]
+      },
+      "hairline": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "oklch(0.905 0.006 300)",
+        "tonalRamp": [
+          "oklch(0.150 0.003 300)",
+          "oklch(0.264 0.004 300)",
+          "oklch(0.379 0.004 300)",
+          "oklch(0.493 0.005 300)",
+          "oklch(0.607 0.006 300)",
+          "oklch(0.721 0.005 300)",
+          "oklch(0.836 0.004 300)",
+          "oklch(0.950 0.004 300)"
+        ]
+      },
+      "hairline-strong": {
+        "role": "neutral",
+        "displayName": "Hairline Strong",
+        "canonical": "oklch(0.83 0.008 300)",
+        "tonalRamp": [
+          "oklch(0.150 0.004 300)",
+          "oklch(0.264 0.005 300)",
+          "oklch(0.379 0.006 300)",
+          "oklch(0.493 0.007 300)",
+          "oklch(0.607 0.008 300)",
+          "oklch(0.721 0.007 300)",
+          "oklch(0.836 0.006 300)",
+          "oklch(0.950 0.005 300)"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "oklch(0.23 0.012 300)",
+        "tonalRamp": [
+          "oklch(0.150 0.006 300)",
+          "oklch(0.264 0.007 300)",
+          "oklch(0.379 0.009 300)",
+          "oklch(0.493 0.011 300)",
+          "oklch(0.607 0.012 300)",
+          "oklch(0.721 0.010 300)",
+          "oklch(0.836 0.009 300)",
+          "oklch(0.950 0.007 300)"
+        ]
+      },
+      "ink-secondary": {
+        "role": "neutral",
+        "displayName": "Ink Secondary",
+        "canonical": "oklch(0.44 0.012 300)",
+        "tonalRamp": [
+          "oklch(0.150 0.006 300)",
+          "oklch(0.264 0.007 300)",
+          "oklch(0.379 0.009 300)",
+          "oklch(0.493 0.011 300)",
+          "oklch(0.607 0.012 300)",
+          "oklch(0.721 0.010 300)",
+          "oklch(0.836 0.009 300)",
+          "oklch(0.950 0.007 300)"
+        ]
+      },
+      "ink-tertiary": {
+        "role": "neutral",
+        "displayName": "Ink Tertiary",
+        "canonical": "oklch(0.52 0.01 300)",
+        "tonalRamp": [
+          "oklch(0.150 0.005 300)",
+          "oklch(0.264 0.006 300)",
+          "oklch(0.379 0.007 300)",
+          "oklch(0.493 0.009 300)",
+          "oklch(0.607 0.010 300)",
+          "oklch(0.721 0.009 300)",
+          "oklch(0.836 0.007 300)",
+          "oklch(0.950 0.006 300)"
+        ]
+      },
+      "plum-ink": {
+        "role": "primary",
+        "displayName": "Plum Ink",
+        "canonical": "oklch(0.46 0.13 330)",
+        "tonalRamp": [
+          "oklch(0.150 0.062 330)",
+          "oklch(0.264 0.079 330)",
+          "oklch(0.379 0.096 330)",
+          "oklch(0.493 0.114 330)",
+          "oklch(0.607 0.129 330)",
+          "oklch(0.721 0.112 330)",
+          "oklch(0.836 0.094 330)",
+          "oklch(0.950 0.077 330)"
+        ]
+      },
+      "plum-ink-deep": {
+        "role": "primary",
+        "displayName": "Plum Ink Deep",
+        "canonical": "oklch(0.40 0.13 330)",
+        "tonalRamp": [
+          "oklch(0.150 0.062 330)",
+          "oklch(0.264 0.079 330)",
+          "oklch(0.379 0.096 330)",
+          "oklch(0.493 0.114 330)",
+          "oklch(0.607 0.129 330)",
+          "oklch(0.721 0.112 330)",
+          "oklch(0.836 0.094 330)",
+          "oklch(0.950 0.077 330)"
+        ]
+      },
+      "plum-wash": {
+        "role": "primary",
+        "displayName": "Plum Wash",
+        "canonical": "oklch(0.955 0.025 330)",
+        "tonalRamp": [
+          "oklch(0.150 0.012 330)",
+          "oklch(0.264 0.015 330)",
+          "oklch(0.379 0.019 330)",
+          "oklch(0.493 0.022 330)",
+          "oklch(0.607 0.025 330)",
+          "oklch(0.721 0.021 330)",
+          "oklch(0.836 0.018 330)",
+          "oklch(0.950 0.015 330)"
+        ]
+      },
+      "on-plum": {
+        "role": "primary",
+        "displayName": "On Plum",
+        "canonical": "oklch(0.99 0.004 330)",
+        "tonalRamp": [
+          "oklch(0.150 0.002 330)",
+          "oklch(0.264 0.002 330)",
+          "oklch(0.379 0.003 330)",
+          "oklch(0.493 0.004 330)",
+          "oklch(0.607 0.004 330)",
+          "oklch(0.721 0.003 330)",
+          "oklch(0.836 0.003 330)",
+          "oklch(0.950 0.002 330)"
+        ]
+      },
+      "focus-plum": {
+        "role": "primary",
+        "displayName": "Focus Plum",
+        "canonical": "oklch(0.55 0.16 330)",
+        "tonalRamp": [
+          "oklch(0.150 0.076 330)",
+          "oklch(0.264 0.097 330)",
+          "oklch(0.379 0.119 330)",
+          "oklch(0.493 0.140 330)",
+          "oklch(0.607 0.159 330)",
+          "oklch(0.721 0.137 330)",
+          "oklch(0.836 0.116 330)",
+          "oklch(0.950 0.095 330)"
+        ]
+      },
+      "delivered-green": {
+        "role": "state",
+        "displayName": "Delivered Green",
+        "canonical": "oklch(0.47 0.12 152)",
+        "tonalRamp": [
+          "oklch(0.150 0.057 152)",
+          "oklch(0.264 0.073 152)",
+          "oklch(0.379 0.089 152)",
+          "oklch(0.493 0.105 152)",
+          "oklch(0.607 0.119 152)",
+          "oklch(0.721 0.103 152)",
+          "oklch(0.836 0.087 152)",
+          "oklch(0.950 0.071 152)"
+        ]
+      },
+      "delivered-wash": {
+        "role": "state",
+        "displayName": "Delivered Wash",
+        "canonical": "oklch(0.955 0.035 152)",
+        "tonalRamp": [
+          "oklch(0.150 0.017 152)",
+          "oklch(0.264 0.021 152)",
+          "oklch(0.379 0.026 152)",
+          "oklch(0.493 0.031 152)",
+          "oklch(0.607 0.035 152)",
+          "oklch(0.721 0.030 152)",
+          "oklch(0.836 0.025 152)",
+          "oklch(0.950 0.021 152)"
+        ]
+      },
+      "retry-amber": {
+        "role": "state",
+        "displayName": "Retry Amber",
+        "canonical": "oklch(0.50 0.11 70)",
+        "tonalRamp": [
+          "oklch(0.150 0.052 70)",
+          "oklch(0.264 0.067 70)",
+          "oklch(0.379 0.082 70)",
+          "oklch(0.493 0.096 70)",
+          "oklch(0.607 0.109 70)",
+          "oklch(0.721 0.094 70)",
+          "oklch(0.836 0.080 70)",
+          "oklch(0.950 0.065 70)"
+        ]
+      },
+      "retry-wash": {
+        "role": "state",
+        "displayName": "Retry Wash",
+        "canonical": "oklch(0.96 0.045 85)",
+        "tonalRamp": [
+          "oklch(0.150 0.021 85)",
+          "oklch(0.264 0.027 85)",
+          "oklch(0.379 0.033 85)",
+          "oklch(0.493 0.039 85)",
+          "oklch(0.607 0.045 85)",
+          "oklch(0.721 0.039 85)",
+          "oklch(0.836 0.033 85)",
+          "oklch(0.950 0.027 85)"
+        ]
+      },
+      "failure-red": {
+        "role": "state",
+        "displayName": "Failure Red",
+        "canonical": "oklch(0.51 0.18 27)",
+        "tonalRamp": [
+          "oklch(0.150 0.086 27)",
+          "oklch(0.264 0.110 27)",
+          "oklch(0.379 0.134 27)",
+          "oklch(0.493 0.158 27)",
+          "oklch(0.607 0.178 27)",
+          "oklch(0.721 0.154 27)",
+          "oklch(0.836 0.130 27)",
+          "oklch(0.950 0.106 27)"
+        ]
+      },
+      "failure-wash": {
+        "role": "state",
+        "displayName": "Failure Wash",
+        "canonical": "oklch(0.955 0.03 27)",
+        "tonalRamp": [
+          "oklch(0.150 0.014 27)",
+          "oklch(0.264 0.018 27)",
+          "oklch(0.379 0.022 27)",
+          "oklch(0.493 0.026 27)",
+          "oklch(0.607 0.030 27)",
+          "oklch(0.721 0.026 27)",
+          "oklch(0.836 0.022 27)",
+          "oklch(0.950 0.018 27)"
+        ]
+      },
+      "info-blue": {
+        "role": "state",
+        "displayName": "Info Blue",
+        "canonical": "oklch(0.48 0.09 245)",
+        "tonalRamp": [
+          "oklch(0.150 0.043 245)",
+          "oklch(0.264 0.055 245)",
+          "oklch(0.379 0.067 245)",
+          "oklch(0.493 0.079 245)",
+          "oklch(0.607 0.089 245)",
+          "oklch(0.721 0.077 245)",
+          "oklch(0.836 0.065 245)",
+          "oklch(0.950 0.053 245)"
+        ]
+      },
+      "in-flight-violet": {
+        "role": "state",
+        "displayName": "In Flight Violet",
+        "canonical": "oklch(0.48 0.13 292)",
+        "tonalRamp": [
+          "oklch(0.150 0.062 292)",
+          "oklch(0.264 0.079 292)",
+          "oklch(0.379 0.096 292)",
+          "oklch(0.493 0.114 292)",
+          "oklch(0.607 0.129 292)",
+          "oklch(0.721 0.112 292)",
+          "oklch(0.836 0.094 292)",
+          "oklch(0.950 0.077 292)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "The single page h1."
+      },
+      "verdict": {
+        "displayName": "Verdict",
+        "purpose": "State sentence at the top of overview screens."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Section headings."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Running text and table cells, tabular numerals."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Buttons, nav, form labels, badges."
+      },
+      "data": {
+        "displayName": "Data",
+        "purpose": "URLs, IDs, event types, HTTP codes, payloads."
+      }
+    },
+    "shadows": [
+      {
+        "name": "pop",
+        "value": "0 1px 2px oklch(0.2 0.02 300 / 0.06), 0 8px 24px oklch(0.2 0.02 300 / 0.12)",
+        "purpose": "Toasts and open row menus only (dark: 0 1px 2px oklch(0 0 0 / 0.3), 0 8px 24px oklch(0 0 0 / 0.45))."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-out-quart",
+        "value": "cubic-bezier(0.25, 1, 0.5, 1)",
+        "purpose": "All state transitions, 150 to 220ms. Removed under prefers-reduced-motion."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "compact",
+        "value": "40rem"
+      },
+      {
+        "name": "live-label",
+        "value": "52rem"
+      },
+      {
+        "name": "touch",
+        "value": "(pointer: coarse)"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one main action on a view.",
+      "html": "<button class=\"ds-btn-primary\">New subscription</button>",
+      "css": ".ds-btn-primary{display:inline-flex;align-items:center;min-height:2.25rem;padding:0 1rem;border-radius:6px;background:oklch(0.46 0.13 330);border:1px solid oklch(0.46 0.13 330);color:oklch(0.99 0.004 330);font:560 0.8125rem/1 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;cursor:pointer;transition:background-color 150ms cubic-bezier(0.25,1,0.5,1)} .ds-btn-primary:hover{background:oklch(0.40 0.13 330);border-color:oklch(0.40 0.13 330)} .ds-btn-primary:focus-visible{outline:2px solid oklch(0.55 0.16 330);outline-offset:2px}"
+    },
+    {
+      "name": "Default Button",
+      "kind": "button",
+      "refersTo": "button-default",
+      "description": "Secondary actions.",
+      "html": "<button class=\"ds-btn-default\">Pause deliveries</button>",
+      "css": ".ds-btn-default{display:inline-flex;align-items:center;min-height:2.25rem;padding:0 1rem;border-radius:6px;border:1px solid oklch(0.83 0.008 300);background:oklch(0.996 0.002 300);color:oklch(0.23 0.012 300);font:560 0.8125rem/1 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;cursor:pointer} .ds-btn-default:hover{background:oklch(0.962 0.005 300)} .ds-btn-default:focus-visible{outline:2px solid oklch(0.55 0.16 330);outline-offset:2px}"
+    },
+    {
+      "name": "Danger Button",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Destructive actions; always confirmed.",
+      "html": "<button class=\"ds-btn-danger\">Delete subscription</button>",
+      "css": ".ds-btn-danger{display:inline-flex;align-items:center;min-height:2.25rem;padding:0 1rem;border-radius:6px;border:1px solid oklch(0.83 0.008 300);background:oklch(0.996 0.002 300);color:oklch(0.51 0.18 27);font:560 0.8125rem/1 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;cursor:pointer} .ds-btn-danger:hover{background:oklch(0.955 0.03 27);border-color:oklch(0.51 0.18 27)} .ds-btn-danger:focus-visible{outline:2px solid oklch(0.55 0.16 330);outline-offset:2px}"
+    },
+    {
+      "name": "Status Badge",
+      "kind": "chip",
+      "refersTo": "badge-delivered",
+      "description": "Delivery state: dot plus word, never colour alone.",
+      "html": "<span class=\"ds-badge ds-badge-ok\">delivered</span> <span class=\"ds-badge ds-badge-bad\">failed attempt</span>",
+      "css": ".ds-badge{display:inline-flex;align-items:center;gap:0.375rem;padding:0.125rem 0.5rem;border-radius:999px;font:560 0.75rem/1.4 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif} .ds-badge::before{content:'';width:0.375rem;height:0.375rem;border-radius:50%;background:currentColor} .ds-badge-ok{background:oklch(0.955 0.035 152);color:oklch(0.47 0.12 152)} .ds-badge-bad{background:oklch(0.955 0.03 27);color:oklch(0.51 0.18 27)}"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Form field with a plum focus halo.",
+      "html": "<input class=\"ds-input\" placeholder=\"https://example.com/hooks\">",
+      "css": ".ds-input{width:100%;min-height:2.5rem;padding:0.5rem 0.75rem;border:1px solid oklch(0.83 0.008 300);border-radius:6px;background:oklch(0.996 0.002 300);color:oklch(0.23 0.012 300);font:400 0.9375rem/1.5 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;transition:border-color 150ms,box-shadow 150ms} .ds-input:hover{border-color:oklch(0.52 0.01 300)} .ds-input:focus-visible{outline:none;border-color:oklch(0.55 0.16 330);box-shadow:0 0 0 3px color-mix(in oklch, oklch(0.55 0.16 330) 25%, transparent)}"
+    },
+    {
+      "name": "Top Navigation",
+      "kind": "nav",
+      "refersTo": "nav-link-active",
+      "description": "Text links; the active item sits on raised surface with a plum underline.",
+      "html": "<nav class=\"ds-nav\"><a href=\"#\" class=\"ds-nav-link\" aria-current=\"page\">Overview</a><a href=\"#\" class=\"ds-nav-link\">Subscriptions</a><a href=\"#\" class=\"ds-nav-link\">Dead letters</a></nav>",
+      "css": ".ds-nav{display:flex;gap:0.25rem;padding:0.5rem;background:oklch(0.996 0.002 300);border-bottom:1px solid oklch(0.905 0.006 300)} .ds-nav-link{padding:0.5rem 0.75rem;border-radius:6px;color:oklch(0.44 0.012 300);text-decoration:none;font:520 0.8125rem/1.2 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif} .ds-nav-link:hover{background:oklch(0.962 0.005 300);color:oklch(0.23 0.012 300)} .ds-nav-link[aria-current=page]{background:oklch(0.962 0.005 300);color:oklch(0.23 0.012 300);box-shadow:inset 0 -2px 0 oklch(0.46 0.13 330)} .ds-nav-link:focus-visible{outline:2px solid oklch(0.55 0.16 330);outline-offset:2px}"
+    },
+    {
+      "name": "Verdict",
+      "kind": "custom",
+      "refersTo": "verdict",
+      "description": "State-first panel that opens overview screens (failing variant).",
+      "html": "<section class=\"ds-verdict\"><span class=\"ds-v-badge\">failing</span><h2 class=\"ds-v-title\">33.3% of delivery attempts succeeded</h2><div class=\"ds-v-meter\"><span></span></div><p class=\"ds-v-detail\">1 of 3 attempts in the last 24 hours. <a href=\"#\">1 dead letter needs attention.</a></p></section>",
+      "css": ".ds-verdict{display:grid;gap:0.75rem;padding:1.5rem;border-radius:10px;border:1px solid color-mix(in oklch, oklch(0.51 0.18 27) 40%, oklch(0.905 0.006 300));background:color-mix(in oklch, oklch(0.955 0.03 27) 55%, oklch(0.996 0.002 300));font-family:system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;color:oklch(0.23 0.012 300)} .ds-v-badge{justify-self:start;padding:0.125rem 0.5rem;border-radius:999px;background:oklch(0.955 0.03 27);color:oklch(0.51 0.18 27);font:560 0.75rem/1.4 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif} .ds-v-title{margin:0;font:640 1.375rem/1.3 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;letter-spacing:-0.01em} .ds-v-meter{height:6px;border-radius:999px;background:oklch(0.905 0.006 300)} .ds-v-meter span{display:block;width:33%;height:100%;border-radius:inherit;background:oklch(0.51 0.18 27)} .ds-v-detail{margin:0;color:oklch(0.44 0.012 300);font-size:0.9375rem} .ds-v-detail a{color:oklch(0.46 0.13 330)}"
+    },
+    {
+      "name": "Ledger Group",
+      "kind": "custom",
+      "refersTo": "verdict",
+      "description": "Grouped, linked figures instead of metric cards.",
+      "html": "<section class=\"ds-ledger\"><div class=\"ds-l-head\"><h3>Dead letters</h3><a href=\"#\">Open queue</a></div><div class=\"ds-l-row\"><span>Dead, awaiting action</span><a href=\"#\" class=\"ds-l-alert\">1</a></div><div class=\"ds-l-row\"><span>Retried</span><a href=\"#\">1</a></div></section>",
+      "css": ".ds-ledger{display:grid;gap:0.5rem;max-width:16rem;font-family:system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;color:oklch(0.23 0.012 300)} .ds-l-head{display:flex;justify-content:space-between;align-items:baseline;padding-bottom:0.5rem;border-bottom:1px solid oklch(0.83 0.008 300)} .ds-l-head h3{margin:0;font:620 0.8125rem/1.3 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;text-transform:uppercase;letter-spacing:0.06em;color:oklch(0.44 0.012 300)} .ds-l-head a{font-size:0.75rem;color:oklch(0.46 0.13 330)} .ds-l-row{display:flex;justify-content:space-between;padding:0.5rem 0;border-bottom:1px solid oklch(0.905 0.006 300);font-size:0.8125rem;color:oklch(0.44 0.012 300)} .ds-l-row a{color:oklch(0.23 0.012 300);font:600 1.125rem/1 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;text-decoration:none;font-variant-numeric:tabular-nums} .ds-l-row a:hover{color:oklch(0.46 0.13 330);text-decoration:underline} .ds-l-row a.ds-l-alert{color:oklch(0.51 0.18 27)}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Operations Ledger",
+    "overview": "This console reads like a well-kept ledger, not a dashboard. Every screen opens with a plain statement of what is true right now (the verdict), then lists the figures behind it in grouped rows you can act on. Hierarchy comes from type weight, size and spacing on calm, near-white (or near-black) surfaces. Colour is spent almost entirely on meaning: one plum-ink accent for actions and the current selection, and green, amber and red only for delivery state. It is a tool someone opens for a few minutes to answer \"is it working, and what failed?\", so it is dense where data is dense and quiet everywhere else.\n\nThe system follows PRODUCT.md: \"Precise, quiet, trustworthy. Closest reference: Linear.\" It explicitly rejects generic Bootstrap or AdminLTE admin themes (blue primary buttons, gray cards, icon sidebars), neon-on-black \"developer tool\" aesthetics, SaaS hero-metric card rows, and glassmorphism or gradient-heavy decoration.\n\nLayout is a single centred column (max 76rem) under a slim top bar with text navigation. Figures sit in a responsive ledger grid (`auto-fit`, 15rem minimum per group), tables scroll inside their own bordered wrapper, and below 40rem the gutters tighten and key-value lists stack. Motion is limited to 150 to 220ms state feedback with an ease-out-quart curve; nothing animates on page load, and `prefers-reduced-motion` removes it all.",
+    "keyCharacteristics": [
+      "State first: a verdict sentence with a meter opens every overview screen.",
+      "Ledger groups with hairline rules instead of cards.",
+      "Restrained colour: tinted neutrals (hue 300) plus one plum-ink accent (hue 330).",
+      "Status colour always paired with a text label and a dot, never colour alone.",
+      "System sans for everything; monospace only for data (URLs, IDs, payloads, HTTP codes).",
+      "Light and dark themes follow the OS (`prefers-color-scheme`)."
+    ],
+    "rules": [
+      {
+        "name": "The Status-Only Rule",
+        "body": "Green, amber and red are reserved for delivery state. A decorative use of a state colour is a bug.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Accent Rule",
+        "body": "Plum ink covers well under 10% of any screen: primary actions, links, current selection, focus. If a screen feels plum, something is decorated that should not be.",
+        "section": "colors"
+      },
+      {
+        "name": "The Label-Always Rule",
+        "body": "Every state colour ships with a word (\"failed attempt\", \"dead\", \"paused\") and a dot. Colour never carries meaning alone.",
+        "section": "colors"
+      },
+      {
+        "name": "The Machine Text Rule",
+        "body": "Monospace means \"this is literally what the system sees\". Never use it for prose, labels or decoration.",
+        "section": "typography"
+      },
+      {
+        "name": "The Tight Scale Rule",
+        "body": "Steps stay between 1.15 and 1.25 apart (0.75, 0.8125, 0.9375, 1.125, 1.375, 1.75rem). No display sizes, no fluid type.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat-By-Default Rule",
+        "body": "Anything that sits in the page flow is flat. Only toasts and open menus, which float over content, get the Pop shadow.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** open every overview screen with the verdict: what is true now, in words and a number.",
+      "**Do** make every figure a link to the rows it counts.",
+      "**Do** pair every state colour with its word and a dot.",
+      "**Do** keep plum ink for actions, links, current selection and focus only.",
+      "**Do** use monospace for URLs, IDs, event types, HTTP codes and payloads, and nowhere else.",
+      "**Do** confirm destructive actions and keep them in the danger style (failure-red text, wash on hover).",
+      "**Do** keep transitions between 150 and 250ms with the ease-out-quart curve, and honour `prefers-reduced-motion`.",
+      "**Do** define colours as OKLCH tokens and redefine them for dark mode; never hard-code a colour in a component."
+    ],
+    "donts": [
+      "**Don't** build a generic Bootstrap or AdminLTE admin theme: blue primary buttons, gray cards, icon sidebars.",
+      "**Don't** use neon-on-black \"developer tool\" aesthetics: glowing green or cyan accents.",
+      "**Don't** build SaaS hero-metric card rows: identical big-number cards with gradient accents and tiny labels.",
+      "**Don't** use glassmorphism or gradient-heavy decoration, including gradient text.",
+      "**Don't** put a coloured stripe on one side of a card, row or alert (`border-left` or `border-right` over 1px as an accent).",
+      "**Don't** use pure black or white; neutrals stay tinted toward hue 300.",
+      "**Don't** add shadows to anything in the page flow; only toasts and menus float.",
+      "**Don't** animate layout properties (width, height, top, left) or choreograph page loads.",
+      "**Don't** use inline styles or scripts; the CSP (`style-src 'self'; script-src 'self'`) forbids them. Widths come from the `w-0` to `w-100` utility classes.",
+      "**Don't** use em dashes in interface copy."
+    ]
+  }
+}

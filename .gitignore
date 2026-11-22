@@ -1,7 +1,10 @@
 .env
 *.db
+*.db-shm
+*.db-wal
 .claude
-.github/
+.github/*
+!.github/workflows/
 _bmad 
 _bmad-output
 docs/

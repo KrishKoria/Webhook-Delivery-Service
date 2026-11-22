@@ -1,0 +1,30 @@
+{{define "content"}}
+<header class="page-head">
+  <div class="page-head__row">
+    <div class="page-head__title">
+      <h1>Subscriptions</h1>
+      <p class="lede">Each subscription receives events posted to <span class="mono">/ingest/&lt;id&gt;</span> and has them delivered to its target URL.</p>
+    </div>
+    <div class="page-head__actions"><a class="btn btn--primary" href="/ui/subscriptions/new">New subscription</a></div>
+  </div>
+</header>
+{{with .Data}}
+{{if .Subs}}
+<div class="table-wrap"><table class="table">
+  <caption class="sr-only">Subscriptions, newest first</caption>
+  <thead><tr>
+    <th scope="col">Target</th><th scope="col">Events</th><th scope="col">Signing</th><th scope="col">Status</th><th scope="col">Created</th>
+    <th scope="col"><span class="sr-only">Actions</span></th>
+  </tr></thead>
+  <tbody>{{range .Subs}}{{template "sub_item" .}}{{end}}</tbody>
+</table></div>
+{{template "pager" .Pager}}
+{{else}}
+<div class="empty">
+  <strong>No subscriptions yet.</strong>
+  <span>A subscription pairs an ingest URL with the endpoint that should receive the events.</span>
+  <a class="btn btn--primary" href="/ui/subscriptions/new">Create the first one</a>
+</div>
+{{end}}
+{{end}}
+{{end}}

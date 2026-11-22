@@ -2,220 +2,211 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"html/template"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
-	"github.com/KrishKoria/Webhook-Delivery-Service/internal/api"
-	"github.com/KrishKoria/Webhook-Delivery-Service/internal/api/middleware"
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/cache"
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/database"
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/db"
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/delivery"
+	"github.com/KrishKoria/Webhook-Delivery-Service/internal/migrate"
+	"github.com/KrishKoria/Webhook-Delivery-Service/internal/server"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 )
 
-// validateConfig checks required environment variables and returns combined errors.
-func validateConfig() error {
-	var errs []string
-	// TURSO_DATABASE_URL is required for Turso/libSQL database.
-	if os.Getenv("TURSO_DATABASE_URL") == "" {
-		errs = append(errs, "TURSO_DATABASE_URL is required")
+// version is set at build time: -ldflags "-X main.version=1.2.3".
+var version = "dev"
+
+func main() {
+	_ = godotenv.Load()
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel()}))
+	slog.SetDefault(logger)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	var err error
+	if len(os.Args) > 1 && os.Args[1] == "migrate" {
+		err = runMigrate(ctx)
+	} else {
+		err = run(ctx, logger)
 	}
-	// PORT is optional (defaults to 8080). If set, sanity-check.
-	if port := os.Getenv("PORT"); port != "" {
-		if port == "0" {
-			errs = append(errs, "PORT cannot be 0")
+	if err != nil {
+		slog.Error("fatal", "err", err)
+		os.Exit(1)
+	}
+}
+
+func dbConfig() db.Config {
+	return db.Config{URL: os.Getenv("TURSO_DATABASE_URL"), AuthToken: os.Getenv("TURSO_AUTH_TOKEN")}
+}
+
+// runMigrate applies migrations and exits; intended for a one-off job before deploys.
+func runMigrate(ctx context.Context) error {
+	conn, dialect, err := db.Open(ctx, dbConfig())
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	return migrate.Up(ctx, conn, dialect)
+}
+
+func run(ctx context.Context, logger *slog.Logger) error {
+	port := envOr("PORT", "8080")
+	slog.Info("starting webhook delivery service", "port", port, "db_local", db.IsLocalURL(os.Getenv("TURSO_DATABASE_URL")))
+
+	if err := db.Init(ctx, dbConfig()); err != nil {
+		return fmt.Errorf("init db: %w", err)
+	}
+	defer db.DB.Close()
+
+	if envBool("MIGRATE_ON_START", true) {
+		if err := migrate.Up(ctx, db.DB, db.Dialect); err != nil {
+			return err
 		}
 	}
-	if len(errs) > 0 {
-		return fmt.Errorf("config validation failed: %s", strings.Join(errs, "; "))
+
+	subCache := newCache()
+	queries := database.New(db.DB)
+
+	if os.Getenv("GIN_MODE") == "" {
+		gin.SetMode(gin.ReleaseMode)
+	}
+	router, err := server.NewRouter(server.Deps{
+		Context:        ctx,
+		Version:        version,
+		StartTime:      time.Now(),
+		DB:             db.DB,
+		Queries:        queries,
+		Cache:          subCache,
+		Logger:         logger,
+		TrustedProxies: splitList(os.Getenv("TRUSTED_PROXIES")),
+	})
+	if err != nil {
+		return fmt.Errorf("build router: %w", err)
+	}
+
+	// Background workers stop when ctx is cancelled. Each Start returns only after
+	// its in-flight work has finished (the delivery worker also releases tasks it
+	// claimed but never started), so wg lets shutdown wait for them.
+	// Config comes from env: WORKER_*, WEBHOOK_*, *_RETENTION_* (see package delivery).
+	// Leave ~2s of the shutdown budget for releasing aborted tasks.
+	shutdownTimeout := envDuration("SHUTDOWN_TIMEOUT", 9*time.Second)
+	workerCfg := delivery.LoadWorkerConfigFromEnv()
+	workerCfg.DrainTimeout = max(shutdownTimeout-2*time.Second, time.Second)
+
+	var wg sync.WaitGroup
+	for _, start := range []func(context.Context){
+		delivery.NewWorker(db.DB, subCache, workerCfg).Start,
+		delivery.NewCleanupWorker(db.DB, delivery.LoadCleanupConfigFromEnv()).Start,
+		delivery.NewScheduledWorker(db.DB).Start,
+	} {
+		wg.Go(func() { start(ctx) })
+	}
+
+	srv := &http.Server{
+		Addr:              ":" + port,
+		Handler:           router,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	serveErr := make(chan error, 1)
+	go func() {
+		slog.Info("http server listening", "addr", srv.Addr)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serveErr <- err
+		}
+		close(serveErr)
+	}()
+
+	select {
+	case err := <-serveErr:
+		if err != nil {
+			return fmt.Errorf("http server: %w", err)
+		}
+	case <-ctx.Done():
+	}
+
+	slog.Info("shutting down", "timeout", shutdownTimeout, "drain", workerCfg.DrainTimeout)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		slog.Error("http server shutdown", "err", err)
+	}
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+		slog.Info("workers stopped cleanly")
+	case <-shutdownCtx.Done():
+		slog.Warn("shutdown timeout reached before workers finished")
 	}
 	return nil
 }
 
-// maskURL masks sensitive parts of URLs for logging
-func maskURL(url string) string {
-	if url == "" {
-		return "NOT SET"
-	}
-	if len(url) > 30 {
-		return url[:30] + "..."
-	}
-	return url
-}
-
-// boolStr returns trueStr if condition is true, falseStr otherwise
-func boolStr(condition bool, trueStr, falseStr string) string {
-	if condition {
-		return trueStr
-	}
-	return falseStr
-}
-
-func main() {
-	// ---------------------------------------------------------------
-	// Load Environment Variables
-	// ---------------------------------------------------------------
-	_ = godotenv.Load()
-
-	// ---------------------------------------------------------------
-	// Log startup info for Cloud Run debugging
-	// ---------------------------------------------------------------
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
-	log.Printf("=== Webhook Delivery Service Starting ===")
-	log.Printf("PORT: %s", port)
-	log.Printf("TURSO_DATABASE_URL: %s", maskURL(os.Getenv("TURSO_DATABASE_URL")))
-	log.Printf("TURSO_AUTH_TOKEN: %s", boolStr(os.Getenv("TURSO_AUTH_TOKEN") != "", "SET", "NOT SET"))
-
-	// ---------------------------------------------------------------
-	// Config Validation (fail fast)
-	// ---------------------------------------------------------------
-	if err := validateConfig(); err != nil {
-		log.Fatalf("STARTUP ERROR: %v", err)
-	}
-
-	// ---------------------------------------------------------------
-	// Database Initialization
-	// ---------------------------------------------------------------
-	log.Println("Initializing database connection...")
-	if err := db.Init(); err != nil {
-		log.Fatalf("failed to initialize db: %v", err)
-	}
-	log.Println("Database connection established")
-
-	// ---------------------------------------------------------------
-	// Admin Auth Configuration
-	// ---------------------------------------------------------------
-	authConfig := middleware.LoadAdminAuthConfig()
-	sizeLimitConfig := middleware.LoadRequestSizeLimitConfig()
-	rateLimitConfig := middleware.LoadRateLimitConfig()
-	rateLimiter := middleware.NewRateLimiter(rateLimitConfig)
-
-	// ---------------------------------------------------------------
-	// Gin Setup
-	// ---------------------------------------------------------------
-	r := gin.Default()
-
-	// Apply request ID middleware to all routes
-	r.Use(middleware.RequestID())
-
-	// Define custom template functions
-	r.SetFuncMap(template.FuncMap{
-		"add": func(a, b int) int {
-			return a + b
-		},
-		"subtract": func(a, b int) int {
-			return a - b
-		},
-	})
-
-	r.LoadHTMLGlob("web/templates/*.html")
-	r.Static("/static", "./web/static")
-	queries := database.New(db.DB)
-
-	// ---------------------------------------------------------------
-	// Public Routes (no auth required)
-	// ---------------------------------------------------------------
-	r.GET("/healthz", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
-	})
-
-	// ---------------------------------------------------------------
-	// Redis Cache (Optional)
-	// ---------------------------------------------------------------
-	var subCache *cache.RedisSubscriptionCache
+func newCache() *cache.RedisSubscriptionCache {
 	redisURL := os.Getenv("REDIS_URL")
-	if redisURL != "" {
-		log.Printf("Attempting Redis connection (REDIS_URL set)")
-		c, err := cache.NewRedisSubscriptionCache(redisURL, 5*time.Minute)
-		if err != nil {
-			log.Printf("WARNING: Redis cache unavailable; proceeding without cache (%v)", err)
-		} else {
-			subCache = c
+	if redisURL == "" {
+		slog.Info("REDIS_URL not set; running without subscription cache")
+		return nil
+	}
+	c, err := cache.NewRedisSubscriptionCache(redisURL, 5*time.Minute)
+	if err != nil {
+		slog.Warn("redis unavailable; running without subscription cache", "err", err)
+		return nil
+	}
+	return c
+}
+
+func logLevel() slog.Level {
+	var lvl slog.Level
+	if err := lvl.UnmarshalText([]byte(envOr("LOG_LEVEL", "INFO"))); err != nil {
+		return slog.LevelInfo
+	}
+	return lvl
+}
+
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
+func envBool(key string, def bool) bool {
+	switch strings.ToLower(os.Getenv(key)) {
+	case "1", "true", "yes":
+		return true
+	case "0", "false", "no":
+		return false
+	}
+	return def
+}
+
+func envDuration(key string, def time.Duration) time.Duration {
+	if d, err := time.ParseDuration(os.Getenv(key)); err == nil && d > 0 {
+		return d
+	}
+	return def
+}
+
+func splitList(s string) []string {
+	var out []string
+	for p := range strings.SplitSeq(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
 		}
-	} else {
-		log.Println("REDIS_URL not set; running without Redis cache")
 	}
-
-	// ---------------------------------------------------------------
-	// Data Plane Routes (no admin auth - public ingest endpoint)
-	// Applies request size limiting and rate limiting for security
-	// ---------------------------------------------------------------
-	dataPlane := r.Group("/")
-	dataPlane.Use(middleware.RequestSizeLimit(sizeLimitConfig))
-	dataPlane.Use(middleware.RateLimit(rateLimiter))
-	{
-		webhookHandler := &api.WebhookHandler{Queries: queries, Cache: subCache}
-		api.RegisterWebhookRoutesGroup(dataPlane, webhookHandler)
-	}
-
-	// ---------------------------------------------------------------
-	// Admin API Routes (with JSON auth middleware)
-	// ---------------------------------------------------------------
-	adminAPI := r.Group("/")
-	adminAPI.Use(middleware.AdminAuth(authConfig))
-	{
-		subHandler := &api.SubscriptionHandler{
-			Queries: queries,
-			Cache:   subCache,
-		}
-		api.RegisterSubscriptionRoutesGroup(adminAPI, subHandler)
-
-		analyticsHandler := &api.AnalyticsHandler{Queries: queries}
-		api.RegisterAnalyticsRoutesGroup(adminAPI, analyticsHandler)
-
-		scheduledHandler := &api.ScheduledHandler{Queries: queries}
-		api.RegisterScheduledRoutesGroup(adminAPI, scheduledHandler)
-	}
-
-	// ---------------------------------------------------------------
-	// Admin UI Routes (with HTML auth middleware)
-	// ---------------------------------------------------------------
-	adminUI := r.Group("/")
-	adminUI.Use(middleware.AdminAuthHTML(authConfig))
-	{
-		uiHandler := &api.UIHandler{Queries: queries, Cache: subCache}
-		api.RegisterUIRoutesGroup(adminUI, uiHandler)
-
-		dlqHandler := &api.DLQHandler{Queries: queries}
-		api.RegisterDLQRoutesGroup(adminUI, dlqHandler)
-
-		dashboardHandler := &api.DashboardHandler{Queries: queries, Cache: subCache}
-		api.RegisterDashboardRoutesGroup(adminUI, dashboardHandler)
-
-		metricsHandler := &api.MetricsHandler{Queries: queries}
-		api.RegisterMetricsRoutesGroup(adminUI, metricsHandler)
-
-		backlogHandler := &api.BacklogHandler{Queries: queries}
-		api.RegisterBacklogRoutesGroup(adminUI, backlogHandler)
-	}
-
-	// ---------------------------------------------------------------
-	// Background Workers
-	// ---------------------------------------------------------------
-	worker := delivery.NewWorker(queries, subCache)
-	go worker.Start(context.Background())
-
-	cleanupWorker := delivery.NewCleanupWorker(queries)
-	go cleanupWorker.Start(context.Background())
-
-	scheduledWorker := delivery.NewScheduledWorker(queries)
-	go scheduledWorker.Start(context.Background())
-
-	// ---------------------------------------------------------------
-	// HTTP Server
-	// ---------------------------------------------------------------
-	log.Printf("=== Starting HTTP Server on port %s ===", port)
-	if err := r.Run(":" + port); err != nil {
-		log.Fatalf("Server failed to start: %v", err)
-	}
+	return out
 }

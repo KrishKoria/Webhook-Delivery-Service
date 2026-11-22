@@ -10,7 +10,7 @@
  - Minimal UI for managing, testing, and analyzing subscriptions.
  - Fully containerized with Docker and Docker Compose.
  - Cloud-ready (Google Cloud Run, Fly.io, Railway, etc.).
- - Health check endpoint (`/healthz`) for monitoring.
+ - Liveness and readiness probes (`/livez`, `/readyz`) plus detailed health and metrics endpoints.
  - Dead Letter Queue for failed deliveries (manual retry via UI).
  ---
 
@@ -46,7 +46,7 @@
 
 
  4. **Access the app:**
-    - Open [http://localhost:8080](http://localhost:8080) (redirects to `/ui/subscriptions`).
+    - Open [http://localhost:8080](http://localhost:8080) (redirects to the `/ui/dashboard` overview). Sign in with `ADMIN_USERNAME` / `ADMIN_PASSWORD`.
 
  ---
 
@@ -58,22 +58,35 @@
 
 ## API Documentation
 
-The API documentation, generated from the OpenAPI specification, is available on Bump.sh:
-
-[View API Documentation on Bump.sh](https://bump.sh/krishkoria/doc/webhook-delivery/)
+The API is described by an OpenAPI 3.1 specification: [`doc/api-documentation.yml`](doc/api-documentation.yml). Open it in any OpenAPI viewer (Swagger Editor, Redocly, Scalar) to browse the endpoints, schemas and examples.
 
 ---
 
 ## Environment Variables
 
-The application uses the following environment variables for configuration:
+`.env.example` lists every variable with its default. The ones that matter most:
 
-- `TURSO_DATABASE_URL`: The connection URL for your Turso database (or `file:local.db` for local SQLite).
-- `TURSO_AUTH_TOKEN`: The authentication token for your Turso database (can be empty for local SQLite).
-- `REDIS_URL`: (Optional for local Docker setup) The connection URL for your Redis instance.
-    - If running with `docker-compose` and this variable is empty or not set in `.env`, it defaults to the internal Docker Redis service (`redis://redis:6379/0`).
-    - For external Redis providers (e.g., Upstash), set this to your provider's URL (e.g., `rediss://:<password>@<host>:6379`).
-- `PORT`: (Optional) The port on which the HTTP server will listen. Defaults to `8080`.
+| Variable | Default | Purpose |
+|---|---|---|
+| `ADMIN_USERNAME`, `ADMIN_PASSWORD` | **required** | HTTP Basic credentials for `/api/*` and `/ui/*`. The server **refuses to start** without them. |
+| `ADMIN_AUTH_DISABLED` | `false` | Local development only: opens every admin route (logs a warning). |
+| `TURSO_DATABASE_URL` | | `libsql://`, `turso://` or `https://` for Turso; `file:./dev.db` for local SQLite. |
+| `TURSO_AUTH_TOKEN` | | Turso token (empty for `file:`). |
+| `MIGRATE_ON_START` | `true` | Apply embedded goose migrations at boot. Set `false` and run `webhook-delivery-service migrate` when several instances share a DB. |
+| `REDIS_URL` | | Optional subscription cache. Unset means no cache (the DB is the source of truth). |
+| `PORT` | `8080` | HTTP port. |
+| `TRUSTED_PROXIES` | none | Proxy IPs/CIDRs whose `X-Forwarded-For` is trusted for rate limiting. |
+| `CSRF_TRUSTED_ORIGINS` | none | Extra origins allowed to make state-changing admin requests. |
+| `SHUTDOWN_TIMEOUT` | `9s` | Graceful shutdown budget (Cloud Run gives 10s after SIGTERM). |
+| `WEBHOOK_ALLOW_PRIVATE_IPS` | `false` | Allow delivery to loopback/private/link-local targets (SSRF guard). Local testing only. |
+| `WEBHOOK_TIMEOUT_SECONDS` | `30` | Per-attempt outbound timeout. |
+| `WORKER_CONCURRENCY` | `10` | Parallel deliveries per instance. |
+| `WORKER_MAX_ATTEMPTS` | `6` | Attempts before a task moves to the dead letter queue. |
+| `INGEST_MAX_BODY_SIZE` | `1048576` | Max ingest body in bytes (413 above it). |
+| `INGEST_RATE_LIMIT_RPS` / `_BURST` | `10` / `20` | Per-client ingest rate limit (429 with `Retry-After`). |
+| `LOG_RETENTION_HOURS` | `72` | Delivery log retention. |
+| `TASK_RETENTION_DAYS` | `7` | Retention for finished delivery tasks. |
+| `DLQ_RETRIED_RETENTION_DAYS` | `30` | Retention for dead letters that were already retried. |
 
 ---
 
@@ -83,12 +96,15 @@ The application uses the following environment variables for configuration:
  - **Database:** Turso (production, serverless SQLite) or SQLite (local/dev).
  - **Async Task/Queue:** In-process Go worker, DB-backed queue for reliability.
  - **Scheduled Worker:** Separate Go worker for scheduled webhooks, enqueues delivery tasks at the scheduled time.
- - **Retry Strategy:** Exponential backoff (10s, 30s, 1m, 5m, 15m), max 5 attempts.
+ - **Delivery engine:** DB-backed queue; workers claim batches with a lease and heartbeat, so several instances can share one database without double delivery.
+ - **Retry Strategy:** Backoff of 10s, 30s, 1m, 5m, 15m with ±20% jitter: 6 attempts in total, then the dead letter queue. A receiver's `Retry-After` is honoured (capped at 1h); `410 Gone` dead-letters immediately.
+ - **Signing:** Outbound requests follow [Standard Webhooks](https://www.standardwebhooks.com/) (`webhook-id`, `webhook-timestamp`, `webhook-signature`).
+ - **Security:** Fail-closed admin auth, CSRF protection, strict CSP on the UI, SSRF validation of target URLs, ingest size and rate limits.
  - **Caching:** Redis (Upstash/Redis Cloud) for subscription details.
  - **Containerization:** Docker, orchestrated with Docker Compose.
  - **Cloud Ready:** Deployable to Google Cloud Run, Fly.io, Railway, etc.
  - **Dead Letter Queue:** Failed deliveries after max retries are moved to a DLQ for manual review/retry.
- - **Observability:** Health check endpoint, structured logging
+ - **Observability:** `/livez` and `/readyz` probes, `/api/health`, `/api/metrics`, structured JSON logging (`log/slog`).
 
  ---
 ## Redis Caching
@@ -186,51 +202,61 @@ For these reasons, for any development beyond very quick, isolated tests, using 
 
  ## Sample API Usage
 
+Admin endpoints live under `/api` and need HTTP Basic auth. Requests with a body must be `application/json`.
+
  ### Create a Subscription
  ```bash
- curl -X POST http://localhost:8080/subscriptions \
+ curl -u "$ADMIN_USERNAME:$ADMIN_PASSWORD" -X POST http://localhost:8080/api/subscriptions \
    -H "Content-Type: application/json" \
    -d '{"target_url":"https://webhook.site/your-url","secret":"mysecret","event_types":"order.created,user.updated"}'
  ```
 
- ### List Subscriptions
+ ### List, Update, Delete
  ```bash
- curl http://localhost:8080/subscriptions
+ curl -u "$ADMIN_USERNAME:$ADMIN_PASSWORD" http://localhost:8080/api/subscriptions
+ curl -u "$ADMIN_USERNAME:$ADMIN_PASSWORD" -X PUT http://localhost:8080/api/subscriptions/<id> \
+   -H "Content-Type: application/json" -d '{"target_url":"https://webhook.site/new-url"}'
+ curl -u "$ADMIN_USERNAME:$ADMIN_PASSWORD" -X DELETE http://localhost:8080/api/subscriptions/<id>
  ```
+ Omitting `secret` on update keeps the current one; send `"clear_secret": true` to remove it.
 
- ### Update a Subscription
+ ### Ingest a Webhook (public, no admin auth)
  ```bash
- curl -X PUT http://localhost:8080/subscriptions/<id> \
-  -H "Content-Type: application/json" \
-  -d '{"target_url":"https://webhook.site/your-new-url","secret":"newsecret","event_types":"order.updated,user.deleted"}'
- ```
-
- ### Delete a Subscription
- ```bash
- curl -X DELETE http://localhost:8080/subscriptions/<id>
- ```
-
- ### Ingest a Webhook
- ```bash
+ BODY='{"event":"test"}'
+ SIG="sha256=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac mysecret | sed 's/^.* //')"
  curl -X POST http://localhost:8080/ingest/<subscription_id> \
    -H "Content-Type: application/json" \
    -H "X-Event-Type: order.created" \
-   -H "X-Hub-Signature-256: sha256=<hmac>" \
-   -d '{"event":"test"}'
+   -H "X-Hub-Signature-256: $SIG" \
+   -H "Idempotency-Key: order-42" \
+   -d "$BODY"
  ```
+ Returns `202` with a `task_id`. Repeating the same `Idempotency-Key` returns `200` with the original `task_id` instead of queueing twice.
 
- ### Schedule a Webhook (UI)
- - Go to the subscription's "Schedule New" action in the UI.
- - Fill out the form (payload, time, recurrence).
- - The scheduled webhook will be delivered at the specified time and logged.
+ ### Verify a Delivery (receiver side)
+ Each delivery carries `webhook-id`, `webhook-timestamp` and `webhook-signature: v1,<base64>`. The signature is HMAC-SHA256 over `{webhook-id}.{webhook-timestamp}.{raw body}`. The HMAC key depends on the secret's format:
 
- ---
+ | Secret | HMAC key |
+ |---|---|
+ | `whsec_<base64>` (what `rotate-secret` issues) | the **base64-decoded** bytes after `whsec_`, as in the Standard Webhooks spec |
+ | anything else (a secret you chose, or an older hex secret) | the secret's UTF-8 bytes |
 
- ## Redis Caching
+ With a `whsec_` secret you can use an official [Standard Webhooks library](https://github.com/standard-webhooks/standard-webhooks) as is. By hand:
+ ```python
+ def signing_key(secret: str) -> bytes:
+     if secret.startswith("whsec_"):
+         return base64.b64decode(secret[len("whsec_"):])
+     return secret.encode()
 
- - Uses Redis for subscription caching (Upstash, Redis Cloud, etc.).
- - Set `REDIS_URL` in your `.env` (e.g., `rediss://:<password>@<host>:6379` for Upstash).
- - No local Redis container is needed if using a cloud provider.
+ expected = "v1," + base64.b64encode(hmac.new(signing_key(secret), f"{wid}.{ts}.".encode() + body, hashlib.sha256).digest()).decode()
+ ok = any(hmac.compare_digest(expected, s) for s in signature_header.split())
+ ```
+ After rotating to a `whsec_` secret, update the receiver's key handling too, or every check fails. Inbound `X-Hub-Signature-256` on `/ingest` always uses the secret text itself as the key.
+ Reject timestamps more than a few minutes old to stop replays, and de-duplicate on `webhook-id` (it stays the same across retries).
+
+ ### Schedule a Webhook
+ In the UI open a subscription's **Scheduled** tab, or `POST /api/scheduled` with `subscription_id`, `payload`, `scheduled_for` (RFC 3339) and `recurrence` (`none`, `daily`, `weekly`, `monthly`).
+
  ---
 
  ## Cost Estimation
@@ -249,7 +275,7 @@ For these reasons, for any development beyond very quick, isolated tests, using 
  - The service is stateless and horizontally scalable.
  - Turso is used for production DB; SQLite for local/dev.
  - Delivery attempts are idempotent and safe to retry.
- - Redis is optional for local/dev, required for production caching.
+ - Redis is optional everywhere; without it every lookup goes to the database.
  - Dead Letter Queue is enabled for failed deliveries.
  - Scheduled webhooks are enqueued as delivery tasks at the scheduled time.
 
@@ -279,8 +305,8 @@ For these reasons, for any development beyond very quick, isolated tests, using 
    Failed deliveries after max retries are moved to a DLQ for manual review and redelivery.
  - **Manual Redelivery:**  
    UI allows retrying failed deliveries from the DLQ.
- - **Health Check:**  
-   `/healthz` endpoint for monitoring and orchestration.
+ - **Health Checks:**  
+   `/livez` (process up) and `/readyz` (database reachable, 503 otherwise) for orchestration; `/healthz` is kept as an alias of `/livez`.
 
  ---
 
@@ -311,13 +337,16 @@ For these reasons, for any development beyond very quick, isolated tests, using 
    --platform managed \
    --region <YOUR_REGION> \
    --allow-unauthenticated \
-   --set-env-vars TURSO_DATABASE_URL=<YOUR_DATABASE_URL>,TURSO_AUTH_TOKEN=<YOUR_AUTH_TOKEN>,REDIS_URL=<YOUR_REDIS_URL>
+   --set-env-vars TURSO_DATABASE_URL=<YOUR_DATABASE_URL>,REDIS_URL=<YOUR_REDIS_URL>,ADMIN_USERNAME=<USER> \
+   --set-secrets TURSO_AUTH_TOKEN=turso-token:latest,ADMIN_PASSWORD=admin-password:latest
  ```
+
+ > **The service will not start without `ADMIN_USERNAME` and `ADMIN_PASSWORD`.** Set them before deploying a new revision, otherwise the revision fails its startup probe. Prefer Secret Manager (`--set-secrets`) for the password and Turso token. `--allow-unauthenticated` only opens the network path: `/ingest` stays public, while `/api` and `/ui` still require the admin credentials.
 
  ### 3. **Access the Service**
  After deployment, you will receive a URL for your service. You can access the UI and API at 
  ```bash
- https://<your-cloud-run-url>/ui/subscriptions
+ https://<your-cloud-run-url>/ui/dashboard
  ```
 
  ---

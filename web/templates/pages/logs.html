@@ -1,0 +1,24 @@
+{{define "content"}}
+{{template "sub_header" .Data}}
+{{with .Data}}
+<form class="filters" method="get" action="/ui/subscriptions/{{.Sub.ID}}/logs">
+  <div class="field">
+    <label class="field__label" for="f-outcome">Outcome</label>
+    <select class="select select--sm" id="f-outcome" name="outcome">
+      <option value="">Any outcome</option>
+      {{range .Outcomes}}<option value="{{.}}"{{if eq . $.Data.Outcome}} selected{{end}}>{{if eq . "success"}}Success{{else}}Failed attempt{{end}}</option>{{end}}
+    </select>
+  </div>
+  <div class="field">
+    <label class="field__label" for="f-status">Task status</label>
+    <select class="select select--sm" id="f-status" name="status">
+      <option value="">Any status</option>
+      {{range .Statuses}}<option value="{{.}}"{{if eq . $.Data.Status}} selected{{end}}>{{if eq . "in_flight"}}In flight{{else if eq . "pending"}}Pending{{else if eq . "delivered"}}Delivered{{else}}Failed{{end}}</option>{{end}}
+    </select>
+  </div>
+  <button class="btn btn--sm" type="submit">Apply</button>
+  {{if .IsFiltered}}<a class="btn btn--sm btn--ghost" href="/ui/subscriptions/{{.Sub.ID}}/logs">Clear</a>{{end}}
+</form>
+{{end}}
+{{template "logs_table" .}}
+{{end}}

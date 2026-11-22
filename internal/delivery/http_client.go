@@ -2,9 +2,11 @@ package delivery
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"strconv"
@@ -12,284 +14,280 @@ import (
 	"time"
 )
 
-// HTTPClientConfig holds configuration for the secure HTTP client
+// HTTPClientConfig holds configuration for the outbound webhook HTTP client.
+//
+// Environment variables (see LoadHTTPClientConfigFromEnv):
+//   - WEBHOOK_TIMEOUT_SECONDS      total request timeout (default 30)
+//   - WEBHOOK_DIAL_TIMEOUT_SECONDS TCP connect timeout (default 10)
+//   - WEBHOOK_TLS_TIMEOUT_SECONDS  TLS handshake timeout (default 10)
+//   - WEBHOOK_MAX_REDIRECTS        redirects to follow (default 0)
+//   - WEBHOOK_ALLOW_PRIVATE_IPS    "true" disables the SSRF IP filter (local dev only)
 type HTTPClientConfig struct {
 	// Timeout is the total timeout for the request including dialing, TLS, etc.
 	Timeout time.Duration
-	// DialTimeout is the timeout for establishing the TCP connection
+	// DialTimeout is the timeout for establishing the TCP connection.
 	DialTimeout time.Duration
-	// TLSHandshakeTimeout is the timeout for TLS handshake
+	// TLSHandshakeTimeout is the timeout for the TLS handshake.
 	TLSHandshakeTimeout time.Duration
-	// DisableSSRFProtection disables SSRF protection (for testing only)
+	// DisableSSRFProtection disables SSRF protection (for testing only).
 	DisableSSRFProtection bool
-	// MaxRedirects is the maximum number of redirects to follow (0 = no redirects)
+	// MaxRedirects is the maximum number of redirects to follow (0 = no redirects).
 	MaxRedirects int
-	// AllowPrivateIPs allows requests to private IP ranges (for testing only)
+	// AllowPrivateIPs allows requests to private IP ranges (for testing only).
 	AllowPrivateIPs bool
+	// Resolver resolves host names before dialing. Nil means net.DefaultResolver.
+	Resolver Resolver
 }
 
-// DefaultHTTPClientConfig returns the default secure configuration
+// Resolver is the subset of *net.Resolver used for SSRF checks; tests inject fakes.
+type Resolver interface {
+	LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error)
+}
+
+// ErrBlockedAddress is wrapped by every error caused by the SSRF IP filter.
+var ErrBlockedAddress = errors.New("blocked address")
+
+// DefaultHTTPClientConfig returns the default secure configuration.
 func DefaultHTTPClientConfig() HTTPClientConfig {
 	return HTTPClientConfig{
-		Timeout:               30 * time.Second,
-		DialTimeout:           10 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		DisableSSRFProtection: false,
-		MaxRedirects:          0, // No redirects by default for webhooks
-		AllowPrivateIPs:       false,
+		Timeout:             30 * time.Second,
+		DialTimeout:         10 * time.Second,
+		TLSHandshakeTimeout: 10 * time.Second,
+		MaxRedirects:        0, // webhooks are not redirected by default
 	}
 }
 
-// LoadHTTPClientConfigFromEnv loads configuration from environment variables
+// LoadHTTPClientConfigFromEnv loads configuration from environment variables.
 func LoadHTTPClientConfigFromEnv() HTTPClientConfig {
 	config := DefaultHTTPClientConfig()
-
-	if v := os.Getenv("WEBHOOK_TIMEOUT_SECONDS"); v != "" {
-		if timeout, err := strconv.Atoi(v); err == nil && timeout > 0 {
-			config.Timeout = time.Duration(timeout) * time.Second
-		}
+	if v, ok := envPositiveInt("WEBHOOK_TIMEOUT_SECONDS"); ok {
+		config.Timeout = time.Duration(v) * time.Second
 	}
-
-	if v := os.Getenv("WEBHOOK_DIAL_TIMEOUT_SECONDS"); v != "" {
-		if timeout, err := strconv.Atoi(v); err == nil && timeout > 0 {
-			config.DialTimeout = time.Duration(timeout) * time.Second
-		}
+	if v, ok := envPositiveInt("WEBHOOK_DIAL_TIMEOUT_SECONDS"); ok {
+		config.DialTimeout = time.Duration(v) * time.Second
 	}
-
-	if v := os.Getenv("WEBHOOK_TLS_TIMEOUT_SECONDS"); v != "" {
-		if timeout, err := strconv.Atoi(v); err == nil && timeout > 0 {
-			config.TLSHandshakeTimeout = time.Duration(timeout) * time.Second
-		}
+	if v, ok := envPositiveInt("WEBHOOK_TLS_TIMEOUT_SECONDS"); ok {
+		config.TLSHandshakeTimeout = time.Duration(v) * time.Second
 	}
-
 	if v := os.Getenv("WEBHOOK_MAX_REDIRECTS"); v != "" {
 		if redirects, err := strconv.Atoi(v); err == nil && redirects >= 0 {
 			config.MaxRedirects = redirects
 		}
 	}
-
-	if v := os.Getenv("WEBHOOK_ALLOW_PRIVATE_IPS"); strings.ToLower(v) == "true" {
+	if strings.EqualFold(os.Getenv("WEBHOOK_ALLOW_PRIVATE_IPS"), "true") {
 		config.AllowPrivateIPs = true
 	}
-
 	return config
 }
 
-// NewSecureHTTPClient creates an HTTP client with SSRF protection
+func (c HTTPClientConfig) ssrfEnabled() bool {
+	return !c.DisableSSRFProtection && !c.AllowPrivateIPs
+}
+
+func (c HTTPClientConfig) resolver() Resolver {
+	if c.Resolver != nil {
+		return c.Resolver
+	}
+	return net.DefaultResolver
+}
+
+// NewSecureHTTPClient creates an HTTP client with keep-alives and SSRF protection.
+//
+// With SSRF protection on, the dialer resolves the host itself, validates every
+// returned IP, and connects to a validated IP literal. Because the address that
+// was checked is the address that is dialed, DNS rebinding cannot swap it.
+// TLS still verifies against (and sends SNI for) the URL's host name, because
+// http.Transport derives ServerName from the request, not from the dialed address.
 func NewSecureHTTPClient(config HTTPClientConfig) *http.Client {
-	dialer := &net.Dialer{
-		Timeout: config.DialTimeout,
+	dialer := &net.Dialer{Timeout: config.DialTimeout, KeepAlive: 30 * time.Second}
+	dial := dialer.DialContext
+	if config.ssrfEnabled() {
+		dial = (&ssrfDialer{dialer: dialer, resolver: config.resolver(), allow: checkIP}).DialContext
 	}
 
 	transport := &http.Transport{
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			if !config.DisableSSRFProtection && !config.AllowPrivateIPs {
-				if err := validateAddress(addr); err != nil {
-					return nil, err
-				}
-			}
-			return dialer.DialContext(ctx, network, addr)
-		},
+		Proxy:                 nil, // a proxy would bypass the IP filter
+		DialContext:           dial,
 		TLSHandshakeTimeout:   config.TLSHandshakeTimeout,
 		ResponseHeaderTimeout: config.Timeout,
-		DisableKeepAlives:     true, // Don't reuse connections for webhooks
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   10,
+		IdleConnTimeout:       90 * time.Second,
+		ForceAttemptHTTP2:     true,
 	}
 
-	client := &http.Client{
-		Transport: transport,
-		Timeout:   config.Timeout,
-	}
-
-	// Configure redirect policy
-	if config.MaxRedirects == 0 {
-		// No redirects allowed
-		client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-			return fmt.Errorf("redirects not allowed for webhook delivery")
+	client := &http.Client{Transport: transport, Timeout: config.Timeout}
+	maxRedirects := config.MaxRedirects
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		// Every hop is dialed through the same validating dialer, so only the count needs checking here.
+		if maxRedirects == 0 {
+			return errors.New("redirects not allowed for webhook delivery")
 		}
-	} else {
-		// Limited redirects with SSRF check on each hop
-		client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-			if len(via) >= config.MaxRedirects {
-				return fmt.Errorf("stopped after %d redirects", config.MaxRedirects)
-			}
-			// Validate redirect target if SSRF protection is enabled
-			if !config.DisableSSRFProtection && !config.AllowPrivateIPs {
-				if err := validateURL(req.URL.String()); err != nil {
-					return fmt.Errorf("redirect blocked: %w", err)
-				}
-			}
-			return nil
-		}
-	}
-
-	return client
-}
-
-// validateAddress checks if the address is safe (not a private/internal IP)
-func validateAddress(addr string) error {
-	host, _, err := net.SplitHostPort(addr)
-	if err != nil {
-		// Try without port
-		host = addr
-	}
-
-	// Check if it's an IP address or hostname
-	ip := net.ParseIP(host)
-	if ip == nil {
-		// It's a hostname, resolve it
-		ips, err := net.LookupIP(host)
-		if err != nil {
-			return fmt.Errorf("failed to resolve hostname %s: %w", host, err)
-		}
-		// Check all resolved IPs
-		for _, resolvedIP := range ips {
-			if err := validateIP(resolvedIP); err != nil {
-				return err
-			}
+		if len(via) > maxRedirects { // via holds the original request plus each hop so far
+			return fmt.Errorf("stopped after %d redirects", maxRedirects)
 		}
 		return nil
 	}
-
-	return validateIP(ip)
+	return client
 }
 
-// validateIP checks if the IP is safe (not private, loopback, etc.)
-func validateIP(ip net.IP) error {
-	// Check loopback
-	if ip.IsLoopback() {
-		return fmt.Errorf("loopback addresses not allowed: %s", ip)
+// ssrfDialer resolves, validates and dials a validated IP literal.
+type ssrfDialer struct {
+	dialer   *net.Dialer
+	resolver Resolver
+	allow    func(netip.Addr) error
+}
+
+func (d *ssrfDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid dial address %q: %w", addr, err)
 	}
-
-	// Check private ranges
-	if ip.IsPrivate() {
-		return fmt.Errorf("private IP addresses not allowed: %s", ip)
+	ips, err := resolveAndCheck(ctx, d.resolver, host, d.allow)
+	if err != nil {
+		return nil, err
 	}
-
-	// Check link-local unicast
-	if ip.IsLinkLocalUnicast() {
-		return fmt.Errorf("link-local addresses not allowed: %s", ip)
+	var lastErr error
+	for _, ip := range ips {
+		conn, err := d.dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
 	}
+	return nil, lastErr
+}
 
-	// Check link-local multicast
-	if ip.IsLinkLocalMulticast() {
-		return fmt.Errorf("link-local multicast addresses not allowed: %s", ip)
+// resolveAndCheck returns host's IPs, failing if any of them is not allowed.
+// IP literals are checked without a lookup.
+func resolveAndCheck(ctx context.Context, r Resolver, host string, allow func(netip.Addr) error) ([]netip.Addr, error) {
+	host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+	if ip, err := netip.ParseAddr(host); err == nil {
+		if err := allow(ip); err != nil {
+			return nil, err
+		}
+		return []netip.Addr{ip.Unmap()}, nil
 	}
-
-	// Check interface-local multicast
-	if ip.IsInterfaceLocalMulticast() {
-		return fmt.Errorf("interface-local multicast addresses not allowed: %s", ip)
+	addrs, err := r.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, fmt.Errorf("resolve %s: %w", host, err)
 	}
-
-	// Check multicast
-	if ip.IsMulticast() {
-		return fmt.Errorf("multicast addresses not allowed: %s", ip)
+	if len(addrs) == 0 {
+		return nil, fmt.Errorf("resolve %s: no addresses", host)
 	}
-
-	// Check unspecified (0.0.0.0 or ::)
-	if ip.IsUnspecified() {
-		return fmt.Errorf("unspecified addresses not allowed: %s", ip)
+	ips := make([]netip.Addr, 0, len(addrs))
+	for _, a := range addrs {
+		ip, ok := netip.AddrFromSlice(a.IP)
+		if !ok {
+			return nil, fmt.Errorf("resolve %s: invalid address %v", host, a.IP)
+		}
+		if err := allow(ip); err != nil {
+			return nil, fmt.Errorf("%s resolves to a disallowed address: %w", host, err)
+		}
+		ips = append(ips, ip.Unmap())
 	}
+	return ips, nil
+}
 
-	// Check IPv4 specific ranges
-	if ip4 := ip.To4(); ip4 != nil {
-		// Check for 169.254.0.0/16 (link-local) - already covered by IsLinkLocalUnicast
-		// Check for 100.64.0.0/10 (Carrier-grade NAT / Shared Address Space)
-		if ip4[0] == 100 && ip4[1] >= 64 && ip4[1] <= 127 {
-			return fmt.Errorf("shared address space (100.64.0.0/10) not allowed: %s", ip)
-		}
+// blockedRanges are ranges a webhook may never target: loopback, private,
+// link-local, CGNAT, documentation/benchmark, multicast, reserved, and the IPv6
+// transition ranges that can tunnel to arbitrary IPv4 hosts.
+var blockedRanges = []struct {
+	prefix netip.Prefix
+	why    string
+}{
+	{netip.MustParsePrefix("0.0.0.0/8"), "this-network"},
+	{netip.MustParsePrefix("10.0.0.0/8"), "private"},
+	{netip.MustParsePrefix("100.64.0.0/10"), "shared address space"},
+	{netip.MustParsePrefix("127.0.0.0/8"), "loopback"},
+	{netip.MustParsePrefix("169.254.0.0/16"), "link-local"},
+	{netip.MustParsePrefix("172.16.0.0/12"), "private"},
+	{netip.MustParsePrefix("192.0.0.0/24"), "IETF protocol assignments"},
+	{netip.MustParsePrefix("192.0.2.0/24"), "documentation (TEST-NET-1)"},
+	{netip.MustParsePrefix("192.88.99.0/24"), "6to4 relay"},
+	{netip.MustParsePrefix("192.168.0.0/16"), "private"},
+	{netip.MustParsePrefix("198.18.0.0/15"), "benchmarking"},
+	{netip.MustParsePrefix("198.51.100.0/24"), "documentation (TEST-NET-2)"},
+	{netip.MustParsePrefix("203.0.113.0/24"), "documentation (TEST-NET-3)"},
+	{netip.MustParsePrefix("224.0.0.0/4"), "multicast"},
+	{netip.MustParsePrefix("240.0.0.0/4"), "reserved"},
+	{netip.MustParsePrefix("::/96"), "IPv4-compatible / unspecified / loopback"},
+	{netip.MustParsePrefix("64:ff9b::/96"), "NAT64"},
+	{netip.MustParsePrefix("64:ff9b:1::/48"), "local NAT64"},
+	{netip.MustParsePrefix("100::/64"), "discard-only"},
+	{netip.MustParsePrefix("2001::/32"), "Teredo"},
+	{netip.MustParsePrefix("2001:db8::/32"), "documentation"},
+	{netip.MustParsePrefix("2002::/16"), "6to4"},
+	{netip.MustParsePrefix("fc00::/7"), "unique local"},
+	{netip.MustParsePrefix("fe80::/10"), "link-local"},
+	{netip.MustParsePrefix("ff00::/8"), "multicast"},
+}
 
-		// Check for 192.0.0.0/24 (IETF Protocol Assignments)
-		if ip4[0] == 192 && ip4[1] == 0 && ip4[2] == 0 {
-			return fmt.Errorf("IETF protocol assignments address not allowed: %s", ip)
-		}
-
-		// Check for 192.0.2.0/24 (TEST-NET-1)
-		if ip4[0] == 192 && ip4[1] == 0 && ip4[2] == 2 {
-			return fmt.Errorf("TEST-NET-1 address not allowed: %s", ip)
-		}
-
-		// Check for 198.51.100.0/24 (TEST-NET-2)
-		if ip4[0] == 198 && ip4[1] == 51 && ip4[2] == 100 {
-			return fmt.Errorf("TEST-NET-2 address not allowed: %s", ip)
-		}
-
-		// Check for 203.0.113.0/24 (TEST-NET-3)
-		if ip4[0] == 203 && ip4[1] == 0 && ip4[2] == 113 {
-			return fmt.Errorf("TEST-NET-3 address not allowed: %s", ip)
-		}
-
-		// Check for 0.0.0.0/8 - already covered by IsUnspecified for 0.0.0.0
-		if ip4[0] == 0 {
-			return fmt.Errorf("this host address (0.0.0.0/8) not allowed: %s", ip)
-		}
-
-		// Check for 240.0.0.0/4 (reserved for future use)
-		if ip4[0] >= 240 {
-			return fmt.Errorf("reserved address (240.0.0.0/4) not allowed: %s", ip)
-		}
-
-		// Check for broadcast (255.255.255.255)
-		if ip4[0] == 255 && ip4[1] == 255 && ip4[2] == 255 && ip4[3] == 255 {
-			return fmt.Errorf("broadcast address not allowed: %s", ip)
-		}
+// checkIP reports whether ip may be dialed for a webhook.
+func checkIP(ip netip.Addr) error {
+	// Prefix.Contains is always false for a zoned address ("::1%lo"), so drop
+	// the zone before matching or it would slip past every blocked range.
+	ip = ip.Unmap().WithZone("")
+	if !ip.IsValid() {
+		return fmt.Errorf("%w: invalid IP", ErrBlockedAddress)
 	}
-
-	// Check IPv6 specific ranges
-	if ip6 := ip.To16(); ip6 != nil && ip.To4() == nil {
-		// Check for ::1/128 - already covered by IsLoopback
-		// Check for ::/128 - already covered by IsUnspecified
-
-		// Check for ::ffff:0:0/96 (IPv4-mapped IPv6)
-		if ip6[0] == 0 && ip6[1] == 0 && ip6[2] == 0 && ip6[3] == 0 &&
-			ip6[4] == 0 && ip6[5] == 0 && ip6[6] == 0 && ip6[7] == 0 &&
-			ip6[8] == 0 && ip6[9] == 0 && ip6[10] == 0xff && ip6[11] == 0xff {
-			// Extract IPv4 and validate it
-			ip4 := net.IPv4(ip6[12], ip6[13], ip6[14], ip6[15])
-			return validateIP(ip4)
-		}
-
-		// Check for 64:ff9b::/96 (IPv4/IPv6 translation)
-		if ip6[0] == 0x00 && ip6[1] == 0x64 && ip6[2] == 0xff && ip6[3] == 0x9b {
-			return fmt.Errorf("IPv4/IPv6 translation address not allowed: %s", ip)
-		}
-
-		// Check for fc00::/7 (Unique local address) - similar to private IPv4
-		if ip6[0]&0xfe == 0xfc {
-			return fmt.Errorf("unique local address not allowed: %s", ip)
-		}
-
-		// Check for 2001:db8::/32 (documentation)
-		if ip6[0] == 0x20 && ip6[1] == 0x01 && ip6[2] == 0x0d && ip6[3] == 0xb8 {
-			return fmt.Errorf("documentation address not allowed: %s", ip)
+	for _, r := range blockedRanges {
+		if r.prefix.Contains(ip) {
+			return fmt.Errorf("%w: %s is %s", ErrBlockedAddress, ip, r.why)
 		}
 	}
-
 	return nil
 }
 
-// validateURL validates a URL for SSRF protection
-func validateURL(rawURL string) error {
-	parsedURL, err := url.Parse(rawURL)
+// validateIP is the net.IP form of checkIP.
+func validateIP(ip net.IP) error {
+	addr, ok := netip.AddrFromSlice(ip)
+	if !ok {
+		return fmt.Errorf("%w: invalid IP %v", ErrBlockedAddress, ip)
+	}
+	return checkIP(addr)
+}
+
+// ValidateTargetURL checks that targetURL is an http(s) URL whose host resolves
+// only to public addresses. Use it when a subscription is created or updated.
+// It honours WEBHOOK_ALLOW_PRIVATE_IPS like the delivery client does.
+func ValidateTargetURL(targetURL string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return ValidateTargetURLContext(ctx, targetURL)
+}
+
+// ValidateTargetURLContext is ValidateTargetURL with a caller-supplied context
+// bounding the DNS lookup.
+func ValidateTargetURLContext(ctx context.Context, targetURL string) error {
+	return ValidateTargetURLWithConfig(ctx, targetURL, LoadHTTPClientConfigFromEnv())
+}
+
+// ValidateTargetURLWithConfig validates targetURL with an explicit policy and
+// resolver (config.Resolver). With SSRF protection off only the syntax is checked.
+func ValidateTargetURLWithConfig(ctx context.Context, targetURL string, config HTTPClientConfig) error {
+	u, err := url.Parse(targetURL)
 	if err != nil {
 		return fmt.Errorf("invalid URL: %w", err)
 	}
-
-	// Only allow http and https schemes
-	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
-		return fmt.Errorf("invalid scheme %s, only http and https allowed", parsedURL.Scheme)
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("invalid scheme %q, only http and https allowed", u.Scheme)
 	}
-
-	// Don't allow URLs without hostname
-	if parsedURL.Hostname() == "" {
-		return fmt.Errorf("URL must have a hostname")
+	host := u.Hostname()
+	if host == "" {
+		return errors.New("URL must have a hostname")
 	}
-
-	// Validate the hostname
-	return validateAddress(parsedURL.Host)
+	if !config.ssrfEnabled() {
+		return nil
+	}
+	_, err = resolveAndCheck(ctx, config.resolver(), host, checkIP)
+	return err
 }
 
-// ValidateTargetURL is a public function to validate webhook target URLs
-// This can be used during subscription creation to validate the target URL
-func ValidateTargetURL(targetURL string) error {
-	return validateURL(targetURL)
+func envPositiveInt(key string) (int, bool) {
+	v, err := strconv.Atoi(os.Getenv(key))
+	if err != nil || v <= 0 {
+		return 0, false
+	}
+	return v, true
 }

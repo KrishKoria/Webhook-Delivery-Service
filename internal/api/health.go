@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"log/slog"
 	"net/http"
 	"runtime"
 	"time"
@@ -11,31 +12,36 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// HealthHandler handles health and readiness endpoints.
+// readyTimeout bounds each dependency check so a hung database cannot hang the probe.
+const readyTimeout = 2 * time.Second
+
+// HealthHandler serves liveness, readiness and admin health endpoints.
 type HealthHandler struct {
-	DB       *sql.DB
-	Cache    *cache.RedisSubscriptionCache
-	Version  string
+	DB        *sql.DB
+	Cache     *cache.RedisSubscriptionCache
+	Version   string
 	StartTime time.Time
+	Logger    *slog.Logger
 }
 
-// HealthResponse represents the response for health endpoints.
+// HealthResponse is the body of /readyz and /api/health.
+// Status is "ok", "degraded" (an optional dependency such as Redis is down)
+// or "unavailable" (the database is down).
 type HealthResponse struct {
-	Status    string            `json:"status"`
-	Timestamp string            `json:"timestamp"`
-	Version   string            `json:"version,omitempty"`
-	Uptime    string            `json:"uptime,omitempty"`
-	Checks    map[string]Check  `json:"checks,omitempty"`
+	Status    string           `json:"status"`
+	Timestamp time.Time        `json:"timestamp"`
+	Version   string           `json:"version,omitempty"`
+	Uptime    string           `json:"uptime,omitempty"`
+	Checks    map[string]Check `json:"checks"`
 }
 
-// Check represents a single health check result.
+// Check is a single dependency result. Error details are logged, not returned.
 type Check struct {
-	Status  string `json:"status"`
-	Message string `json:"message,omitempty"`
-	Latency string `json:"latency,omitempty"`
+	Status    string `json:"status"` // ok | error | disabled
+	LatencyMS int64  `json:"latency_ms"`
 }
 
-// SystemInfo represents system runtime information.
+// SystemInfo is the Go runtime snapshot for /api/health/system.
 type SystemInfo struct {
 	GoVersion    string `json:"go_version"`
 	NumCPU       int    `json:"num_cpu"`
@@ -44,193 +50,109 @@ type SystemInfo struct {
 	MemSys       uint64 `json:"mem_sys_bytes"`
 }
 
-// RegisterHealthRoutes registers health endpoints on a gin.Engine.
-func RegisterHealthRoutes(r *gin.Engine, h *HealthHandler) {
-	r.GET("/healthz", h.Healthz)
-	r.GET("/readyz", h.Readyz)
-	r.GET("/livez", h.Livez)
-	r.GET("/api/health", h.DetailedHealth)
-	r.GET("/api/health/system", h.SystemHealth)
+// RegisterProbeRoutes registers the unauthenticated probes. /healthz and /livez
+// are liveness (the process is serving); /readyz checks dependencies.
+func RegisterProbeRoutes(rg *gin.RouterGroup, h *HealthHandler) {
+	rg.GET("/healthz", h.Livez)
+	rg.GET("/livez", h.Livez)
+	rg.GET("/readyz", h.Readyz)
 }
 
-// RegisterHealthRoutesGroup registers health endpoints on a RouterGroup.
-func RegisterHealthRoutesGroup(rg *gin.RouterGroup, h *HealthHandler) {
-	rg.GET("/healthz", h.Healthz)
-	rg.GET("/readyz", h.Readyz)
-	rg.GET("/livez", h.Livez)
+// RegisterAdminHealthRoutes registers the detailed health endpoints on the admin API group.
+func RegisterAdminHealthRoutes(rg *gin.RouterGroup, h *HealthHandler) {
 	rg.GET("/api/health", h.DetailedHealth)
 	rg.GET("/api/health/system", h.SystemHealth)
 }
 
-// Healthz is a simple health check endpoint (Kubernetes-style).
-// Returns 200 OK if the service is running.
-func (h *HealthHandler) Healthz(c *gin.Context) {
+// Livez reports that the process is up. It never touches dependencies, so a
+// slow database cannot get the instance restarted.
+func (h *HealthHandler) Livez(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
-// Livez is a liveness probe endpoint.
-// Returns 200 OK if the service process is alive.
-func (h *HealthHandler) Livez(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"status":    "ok",
-		"timestamp": time.Now().Format(time.RFC3339),
-	})
-}
-
-// Readyz is a readiness probe endpoint.
-// Returns 200 OK only if all critical dependencies are ready.
+// Readyz returns 200 when the database answers (status "ok", or "degraded" when
+// only Redis is down) and 503 when it does not.
 func (h *HealthHandler) Readyz(c *gin.Context) {
-	checks := h.runChecks(c)
-	
-	allHealthy := true
-	for _, check := range checks {
-		if check.Status != "ok" {
-			allHealthy = false
-			break
-		}
+	resp := h.evaluate(c.Request.Context())
+	status := http.StatusOK
+	if resp.Status == "unavailable" {
+		status = http.StatusServiceUnavailable
 	}
-
-	resp := HealthResponse{
-		Timestamp: time.Now().Format(time.RFC3339),
-		Checks:    checks,
-	}
-
-	if allHealthy {
-		resp.Status = "ok"
-		c.JSON(http.StatusOK, resp)
-	} else {
-		resp.Status = "unavailable"
-		c.JSON(http.StatusServiceUnavailable, resp)
-	}
+	c.JSON(status, resp)
 }
 
-// DetailedHealth returns comprehensive health information.
+// DetailedHealth is Readyz plus version and uptime. It always answers 200 so
+// dashboards can read the body.
 func (h *HealthHandler) DetailedHealth(c *gin.Context) {
-	checks := h.runChecks(c)
-	
-	allHealthy := true
-	for _, check := range checks {
-		if check.Status != "ok" {
-			allHealthy = false
-			break
-		}
-	}
-
-	uptime := ""
+	resp := h.evaluate(c.Request.Context())
+	resp.Version = h.Version
 	if !h.StartTime.IsZero() {
-		uptime = time.Since(h.StartTime).Round(time.Second).String()
+		resp.Uptime = time.Since(h.StartTime).Round(time.Second).String()
 	}
-
-	resp := HealthResponse{
-		Timestamp: time.Now().Format(time.RFC3339),
-		Version:   h.Version,
-		Uptime:    uptime,
-		Checks:    checks,
-	}
-
-	if allHealthy {
-		resp.Status = "healthy"
-		c.JSON(http.StatusOK, resp)
-	} else {
-		resp.Status = "degraded"
-		c.JSON(http.StatusOK, resp) // Return 200 with degraded status for observability
-	}
+	c.JSON(http.StatusOK, resp)
 }
 
-// SystemHealth returns system runtime information.
+// SystemHealth returns Go runtime information.
 func (h *HealthHandler) SystemHealth(c *gin.Context) {
-	var memStats runtime.MemStats
-	runtime.ReadMemStats(&memStats)
-
-	info := SystemInfo{
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	RespondSuccess(c, http.StatusOK, SystemInfo{
 		GoVersion:    runtime.Version(),
 		NumCPU:       runtime.NumCPU(),
 		NumGoroutine: runtime.NumGoroutine(),
-		MemAlloc:     memStats.Alloc,
-		MemSys:       memStats.Sys,
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"status":    "ok",
-		"timestamp": time.Now().Format(time.RFC3339),
-		"system":    info,
+		MemAlloc:     m.Alloc,
+		MemSys:       m.Sys,
 	})
 }
 
-// runChecks performs all dependency health checks.
-func (h *HealthHandler) runChecks(c context.Context) map[string]Check {
-	checks := make(map[string]Check)
+func (h *HealthHandler) evaluate(ctx context.Context) HealthResponse {
+	resp := HealthResponse{Status: "ok", Timestamp: time.Now().UTC(), Checks: map[string]Check{}}
 
-	// Database check
-	checks["database"] = h.checkDatabase(c)
+	db := h.check(ctx, "database", func(ctx context.Context) error {
+		if h.DB == nil {
+			return errNotConfigured
+		}
+		return h.DB.PingContext(ctx)
+	})
+	resp.Checks["database"] = db
 
-	// Cache check (if configured)
+	cacheCheck := Check{Status: "disabled"}
 	if h.Cache != nil {
-		checks["cache"] = h.checkCache(c)
+		cacheCheck = h.check(ctx, "cache", h.Cache.Ping)
 	}
+	resp.Checks["cache"] = cacheCheck
 
-	return checks
+	switch {
+	case db.Status != "ok":
+		resp.Status = "unavailable"
+	case cacheCheck.Status == "error":
+		resp.Status = "degraded"
+	}
+	return resp
 }
 
-// checkDatabase verifies database connectivity.
-func (h *HealthHandler) checkDatabase(c context.Context) Check {
-	if h.DB == nil {
-		return Check{
-			Status:  "error",
-			Message: "database not configured",
-		}
-	}
-
-	start := time.Now()
-	ctx, cancel := context.WithTimeout(c, 5*time.Second)
+func (h *HealthHandler) check(ctx context.Context, name string, ping func(context.Context) error) Check {
+	ctx, cancel := context.WithTimeout(ctx, readyTimeout)
 	defer cancel()
-
-	err := h.DB.PingContext(ctx)
-	latency := time.Since(start)
-
-	if err != nil {
-		return Check{
-			Status:  "error",
-			Message: err.Error(),
-			Latency: latency.String(),
-		}
-	}
-
-	return Check{
-		Status:  "ok",
-		Message: "connected",
-		Latency: latency.String(),
-	}
-}
-
-// checkCache verifies Redis cache connectivity.
-func (h *HealthHandler) checkCache(c context.Context) Check {
-	if h.Cache == nil {
-		return Check{
-			Status:  "ok",
-			Message: "cache not configured (optional)",
-		}
-	}
-
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(c, 5*time.Second)
-	defer cancel()
-
-	// Try to ping the cache
-	err := h.Cache.Ping(ctx)
-	latency := time.Since(start)
-
+	err := ping(ctx)
+	c := Check{Status: "ok", LatencyMS: time.Since(start).Milliseconds()}
 	if err != nil {
-		return Check{
-			Status:  "warning",
-			Message: "cache unavailable: " + err.Error(),
-			Latency: latency.String(),
-		}
+		c.Status = "error"
+		h.logger().Warn("health check failed", "check", name, "err", err)
 	}
-
-	return Check{
-		Status:  "ok",
-		Message: "connected",
-		Latency: latency.String(),
-	}
+	return c
 }
+
+func (h *HealthHandler) logger() *slog.Logger {
+	if h.Logger != nil {
+		return h.Logger
+	}
+	return slog.Default()
+}
+
+type healthError string
+
+func (e healthError) Error() string { return string(e) }
+
+const errNotConfigured = healthError("not configured")

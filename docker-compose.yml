@@ -5,21 +5,22 @@ services:
     ports:
       - "8080:8080"
     env_file:
-      - .env # .env can override REDIS_URL if you want to use an external Redis
+      - .env
     environment:
-      - REDIS_URL=redis://redis:6379/0
+      # Overrides REDIS_URL from .env to use the bundled Redis.
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-change-me}@redis:6379/0
     depends_on:
       - redis
     restart: unless-stopped
 
   redis:
-    image: "redis:alpine"
+    image: "redis:7-alpine"
     container_name: webhook-redis
-    ports:
-      - "6379:6379" 
+    # Not published to the host; only the app container can reach it.
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-change-me}"]
     restart: unless-stopped
     volumes:
-      - redis_data:/data 
+      - redis_data:/data
 
 volumes:
-  redis_data: 
+  redis_data:

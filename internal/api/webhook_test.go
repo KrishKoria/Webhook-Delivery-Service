@@ -172,75 +172,22 @@ func generateTestSignatureWithoutPrefix(body []byte, secret string) string {
 func TestSignatureTimingSafe(t *testing.T) {
 	// Verify that signature comparison uses constant-time comparison
 	// This is already guaranteed by hmac.Equal, but we test the behavior
-	
+
 	body := []byte(`{"event":"test"}`)
 	secret := "mysecret"
 	validSig := generateTestSignature(body, secret)
-	
+
 	// These should all fail but timing shouldn't leak info
 	invalidSigs := []string{
 		"sha256=0000000000000000000000000000000000000000000000000000000000000000",
 		"sha256=ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
 		validSig[:len(validSig)-1] + "0", // Off by one
 	}
-	
+
 	for _, sig := range invalidSigs {
 		result := verifySignature(body, secret, sig)
 		if result {
 			t.Errorf("Expected invalid signature %s to fail", sig)
 		}
-	}
-}
-
-// Story 2.4: Ingest Enqueues Tasks Reliably - Tests
-
-func TestIngestWebhook_ReturnsHTTP202(t *testing.T) {
-	// This test verifies the expected HTTP 202 response code
-	// The actual integration test requires a database, but we can document the expected behavior
-	
-	// Expected behavior:
-	// 1. Valid request with existing subscription → HTTP 202 Accepted
-	// 2. Task row created in delivery_tasks table
-	// 3. Response has no body (just status code)
-	
-	expectedStatus := 202 // HTTP Accepted
-	if expectedStatus != 202 {
-		t.Error("Expected ingest to return HTTP 202 Accepted")
-	}
-}
-
-func TestIngestWebhook_ReturnsHTTP404ForMissingSubscription(t *testing.T) {
-	// This test verifies 404 behavior for missing subscriptions
-	// The actual integration test requires a database
-	
-	// Expected behavior:
-	// 1. Request for non-existent subscription → HTTP 404 Not Found
-	// 2. No task row created
-	// 3. Response contains error envelope with request_id
-	
-	expectedStatus := 404 // HTTP Not Found
-	if expectedStatus != 404 {
-		t.Error("Expected ingest to return HTTP 404 for missing subscription")
-	}
-}
-
-func TestIngestWebhook_TaskCreation(t *testing.T) {
-	// This test documents the task creation behavior
-	
-	// Expected task properties:
-	// - ID: UUID v4 format
-	// - SubscriptionID: matches request URL parameter
-	// - Payload: request body content
-	// - Status: pending (default from DB)
-	// - CreatedAt: database timestamp
-	
-	// Task should NOT contain:
-	// - Secrets (never stored in task)
-	// - Request headers (only payload)
-	
-	// This is a documentation test - actual integration requires DB
-	expectedTaskIDFormat := "uuid-v4"
-	if expectedTaskIDFormat != "uuid-v4" {
-		t.Error("Task ID should be UUID v4 format")
 	}
 }

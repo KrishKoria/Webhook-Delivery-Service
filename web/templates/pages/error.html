@@ -1,0 +1,10 @@
+{{define "content"}}
+{{with .Data}}
+<section class="error-page" aria-labelledby="err-title">
+  <p class="error-page__code">Error {{.Status}}</p>
+  <h1 id="err-title">{{if eq .Status 404}}Not found{{else}}Something went wrong{{end}}</h1>
+  <p class="lede">{{.Message}}</p>
+  <p><a class="btn" href="/ui/dashboard">Back to the overview</a></p>
+</section>
+{{end}}
+{{end}}
