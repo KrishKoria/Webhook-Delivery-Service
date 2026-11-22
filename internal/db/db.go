@@ -48,7 +48,7 @@ func Open(ctx context.Context, cfg Config) (*sql.DB, goose.Dialect, error) {
 			if strings.Contains(dsn, "?") {
 				sep = "&"
 			}
-			// Foreign keys are enforced to match the remote Turso engine.
+			// Turso enforces foreign keys, so local databases and tests do too.
 			dsn += sep + "_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
 		}
 		var err error
