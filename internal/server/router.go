@@ -67,12 +67,16 @@ func NewRouter(d Deps) (*gin.Engine, error) {
 	}
 	r.Use(gin.Recovery(), middleware.RequestID(), middleware.RequestLogger(d.Logger))
 
-	htmlRender, err := api.NewUIRenderer(web.Templates)
+	assets, err := api.NewStaticAssets(web.Static)
+	if err != nil {
+		return nil, err
+	}
+	htmlRender, err := api.NewUIRenderer(web.Templates, assets)
 	if err != nil {
 		return nil, err
 	}
 	r.HTMLRender = htmlRender
-	r.StaticFS("/static", http.FS(web.Static))
+	r.Group("/static", assets.CacheHeaders()).StaticFS("/", http.FS(web.Static))
 
 	sizeLimit := middleware.RequestSizeLimit(middleware.LoadRequestSizeLimitConfig())
 	rateLimiter := middleware.NewRateLimiter(middleware.LoadRateLimitConfig())

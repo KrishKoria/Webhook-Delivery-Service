@@ -6,11 +6,11 @@
   <meta name="color-scheme" content="light dark">
   <meta name="htmx-config" content='{"includeIndicatorCSS": false, "noSwap": [204, 304, 400, 401, 403, 413, 415, 429, "5xx"]}'>
   <title>{{.Title}} · Webhook Delivery</title>
-  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="{{asset "styles.css"}}">
   {{- /* htmx 4.0.2: dist/htmx.min.js from https://registry.npmjs.org/htmx.org/-/htmx.org-4.0.2.tgz
          sha256 fd25ba3fe5e44768756f23862a6daa4f928192199a121e825e882e719bc8aabd */}}
-  <script src="/static/vendor/htmx.min.js" defer></script>
-  <script src="/static/js/app.js" defer></script>
+  <script src="{{asset "vendor/htmx.min.js"}}" defer></script>
+  <script src="{{asset "js/app.js"}}" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to main content</a>
