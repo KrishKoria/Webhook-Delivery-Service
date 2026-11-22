@@ -49,7 +49,12 @@ func Open(ctx context.Context, cfg Config) (*sql.DB, goose.Dialect, error) {
 				sep = "&"
 			}
 			// Turso enforces foreign keys, so local databases and tests do too.
-			dsn += sep + "_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
+			// WAL with synchronous=NORMAL commits by appending to the log and
+			// syncs only at checkpoints, instead of fsyncing a rollback journal
+			// on every commit (the bottleneck in bench/: one commit per ingest).
+			// A power cut can lose the last few commits but never corrupts the file.
+			dsn += sep + "_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)" +
+				"&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
 		}
 		var err error
 		conn, err = sql.Open("sqlite", dsn)

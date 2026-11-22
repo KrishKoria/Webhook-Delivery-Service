@@ -78,6 +78,7 @@ The API is described by an OpenAPI 3.1 specification: [`doc/api-documentation.ym
 | `CSRF_TRUSTED_ORIGINS` | none | Extra origins allowed to make state-changing admin requests. |
 | `SHUTDOWN_TIMEOUT` | `9s` | Graceful shutdown budget (Cloud Run gives 10s after SIGTERM). |
 | `WEBHOOK_ALLOW_PRIVATE_IPS` | `false` | Allow delivery to loopback/private/link-local targets (SSRF guard). Local testing only. |
+| `PPROF_ADDR` | unset (off) | Serve `net/http/pprof` on its own listener, e.g. `localhost:6060`. For profiling; never publish this port. |
 | `WEBHOOK_TIMEOUT_SECONDS` | `30` | Per-attempt outbound timeout. |
 | `WORKER_CONCURRENCY` | `10` | Parallel deliveries per instance. |
 | `WORKER_MAX_ATTEMPTS` | `6` | Attempts before a task moves to the dead letter queue. |
@@ -104,6 +105,41 @@ The API is described by an OpenAPI 3.1 specification: [`doc/api-documentation.ym
  - **Cloud Ready:** Deployable to Google Cloud Run, Fly.io, Railway, etc.
  - **Dead Letter Queue:** Failed deliveries after max retries are moved to a DLQ for manual review/retry.
  - **Observability:** `/livez` and `/readyz` probes, `/api/health`, `/api/metrics`, structured JSON logging (`log/slog`).
+
+ ---
+## Benchmarks
+
+A load-test suite in [`bench/`](bench/README.md) hammers the service with [k6](https://grafana.com/docs/k6/) and checks that nothing gets lost along the way. It needs only Docker:
+
+```bash
+bench/run.sh            # all 10 cases, about 40 minutes; cleans up its containers and images afterwards
+```
+
+Setup: **local SQLite** mode, with the app container capped at **1 CPU and 512 MB** (about one default Cloud Run instance). Host: i7-11800H, 16 GB, Docker Desktop on Windows. Production runs on Turso, where network round trips are the limit instead, so these numbers describe the SQLite mode only. **Before** is commit `63700da` (rollback journal). **After** is `c3b859e` (WAL with `synchronous=NORMAL`).
+
+| What we measured | Before | After WAL |
+|---|---|---|
+| Ingest + delivery, 300 events/s offered for 60 s, 10 workers | Accepted **6,796 of 18,000**. Ingest p95 **26.6 s**. Delivered 49/s end to end. | Accepted **all 18,000**. Ingest p95 **13 ms**. Delivered **297/s**, and the queue was empty 0.6 s after ingest stopped. |
+| Same with 50 workers / with Redis | Accepted 9,592 / 12,703 | All 18,000 either way. Worker count and Redis no longer matter at this rate. |
+| Ingest ramp (50 → 5,000 rps; stop when p99 > 500 ms) | Broke at **374 rps** offered | Broke at **1,533 rps** (**1,753** with Redis). CPU is now the limit: 75% of the core on average. |
+| Admin pages (dashboard, lists, metrics), p95 while ingest runs | **10.7–35.1 s** | **11–78 ms** (about 2 ms with nothing else running, before and after) |
+| Payload sizes (1 KB at 200/s, 64 KB at 100/s, 1 MB at 10/s) | Ingest p95 8.4 s, and 6,191 tasks still waiting at the end | All 9,300 accepted. Ingest p95 17 ms, nothing left waiting. The 1 MiB + 1 byte body got 413 both times. |
+| Slow and flaky receivers (100 events/s) | 3,669 tasks waiting after 2 min | 390 waiting. 10 workers against a 200 ms receiver can do about 50/s, so this is the expected limit. |
+| Correctness | **0 lost** of 57,876 accepted | **0 lost** of 94,465 accepted. Idempotency: 4,000 concurrent requests on 20 keys made exactly 20 tasks. The rate limiter let through 638 of a predicted 640. |
+
+The ramp cases are left out of the lost counts. k6 aborts them mid-request, so some accepted events have no task yet.
+
+**Why it was slow:** local SQLite runs on a **single connection** (`internal/db/db.go`). With a rollback journal, every commit waited for an fsync, and everything else waited for that commit. A goroutine dump under load showed **998 of 1,561 goroutines blocked in `database/sql.(*DB).conn`**, while the one goroutine holding the connection sat in SQLite's `_full_fsync`. The app used about 18% of its CPU. WAL appends commits to a log and syncs only at checkpoints. In the same dump after the change, no goroutine is waiting for the database. A power cut can lose the last few commits, but it never corrupts the file.
+
+**Fix list**, roughly by expected impact:
+1. ~~**WAL journal mode with `synchronous=NORMAL`**~~ (done, `c3b859e`). Still to do: a separate pool of read connections. Admin pages under load are now tens of milliseconds, but still about 20× slower than when idle, because they queue behind writes.
+2. **Load shedding on ingest.** Past the breaking point, latency still grows without bound. In each ramp, about 330 requests were cancelled mid-insert when the client gave up. Answering a quick `503` with `Retry-After` once the database wait is too long would push back on senders instead.
+3. **Cache subscriptions in-process.** Redis raised the ramp breaking point 14%, from 1,533 to 1,753 rps. A small in-memory cache with a short TTL would skip both the database and the Redis round trip.
+4. **Separate the finalize timeout from the claim timeout.** In the baseline, a delivery could succeed and then fail to record within the 10 s `dbOpTimeout`. Its lease then expired and the **webhook was delivered again** (16 times). WAL makes this rare (it didn't happen in the WAL run), but the gap is still there.
+5. **Log rate-limited requests at a lower level, or sample them.** The `rate-limit` case still writes about 2,360 WARN lines in 30 s.
+6. **Investigate memory with large payloads.** The app container still reaches 500 MiB of 512 MiB during the 1 MB phase. The Go heap under steady load is about 23 MB, so this is likely SQLite page cache, but it hasn't been profiled yet.
+
+The 50-worker default is no longer on the list: with WAL, 10 and 50 workers deliver the same 297/s.
 
  ---
 ## Redis Caching
