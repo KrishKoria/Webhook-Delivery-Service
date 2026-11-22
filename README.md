@@ -58,9 +58,7 @@
 
 ## API Documentation
 
-The API documentation, generated from the OpenAPI specification, is available on Bump.sh:
-
-[View API Documentation on Bump.sh](https://bump.sh/krishkoria/doc/webhook-delivery/)
+The API is described by an OpenAPI 3.1 specification: [`doc/api-documentation.yml`](doc/api-documentation.yml). Open it in any OpenAPI viewer (Swagger Editor, Redocly, Scalar) to browse the endpoints, schemas and examples.
 
 ---
 
