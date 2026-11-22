@@ -105,11 +105,29 @@ func NewRouter(d Deps) (*gin.Engine, error) {
 	api.RegisterBacklogRoutesGroup(adminAPI, &api.BacklogHandler{Queries: queries})
 	api.RegisterAdminHealthRoutes(adminAPI, health)
 
+	uiAuth, uiHeaders := middleware.AdminAuthHTML(authConfig), api.UISecurityHeaders()
 	adminUI := r.Group("/")
-	adminUI.Use(middleware.AdminAuthHTML(authConfig), api.UISecurityHeaders(), csrf, sizeLimit)
+	adminUI.Use(uiAuth, uiHeaders, csrf, sizeLimit)
 	ui := api.NewUI(d.DB, subCache, d.Logger)
 	ui.AllowPrivateTargets = allowPrivate
 	api.RegisterAdminUI(adminUI, ui)
+
+	// Unknown paths answer in the format of the surface they fall under.
+	r.NoRoute(func(c *gin.Context) {
+		switch p := c.Request.URL.Path; {
+		case p == "/ui" || strings.HasPrefix(p, "/ui/"):
+			// Same gate as real pages, so an unknown admin URL reveals nothing without credentials.
+			if uiAuth(c); c.IsAborted() {
+				return
+			}
+			uiHeaders(c)
+			ui.NotFound(c)
+		case strings.HasPrefix(p, "/api/"):
+			api.RespondError(c, http.StatusNotFound, "no such endpoint", api.ErrCodeNotFound)
+		default:
+			c.String(http.StatusNotFound, "404 page not found")
+		}
+	})
 
 	return r, nil
 }

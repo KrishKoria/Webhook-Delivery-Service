@@ -100,6 +100,24 @@ func (h *harness) createSub(body string) string {
 // --- wiring ------------------------------------------------------------------
 
 // NewRouter panics on duplicate routes, so building it is itself the wiring test.
+func TestUnknownRoutesMatchTheirSurface(t *testing.T) {
+	h := newHarness(t)
+	if w := h.do(http.MethodGet, "/ui/nope", ""); w.Code != http.StatusUnauthorized {
+		t.Fatalf("unknown UI path without auth = %d, want 401", w.Code)
+	}
+	w := h.do(http.MethodGet, "/ui/nope", "", withAuth)
+	if w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), "<!doctype html>") || !strings.Contains(w.Body.String(), "Not found") {
+		t.Fatalf("unknown UI path = %d: %s", w.Code, w.Body.String())
+	}
+	if w.Header().Get("Content-Security-Policy") == "" {
+		t.Fatal("unknown UI path is missing the UI security headers")
+	}
+	w = h.do(http.MethodGet, "/api/nope", "")
+	if w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), `"code":"NOT_FOUND"`) {
+		t.Fatalf("unknown API path = %d %s", w.Code, w.Body.String())
+	}
+}
+
 func TestRouterBuildsWithoutRouteConflicts(t *testing.T) {
 	newHarness(t)
 }
