@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -173,5 +174,48 @@ func TestUIMutations(t *testing.T) {
 	// ... and a styled page without htmx.
 	if w := h.do(http.MethodGet, "/ui/dlq/nope", "", withAuth); w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), "Not found") {
 		t.Fatalf("missing dlq page = %d", w.Code)
+	}
+}
+
+// Pages link fingerprinted asset URLs so a deploy that changes a file also
+// changes its URL; otherwise browsers keep styling new HTML with old CSS.
+func TestStaticAssetsAreFingerprinted(t *testing.T) {
+	h := newHarness(t)
+	page := h.do(http.MethodGet, "/ui/subscriptions", "", withAuth).Body.String()
+
+	for _, name := range []string{"styles.css", "js/app.js", "vendor/htmx.min.js"} {
+		t.Run(name, func(t *testing.T) {
+			m := regexp.MustCompile(`"(/static/` + regexp.QuoteMeta(name) + `\?v=([0-9a-f]+))"`).FindStringSubmatch(page)
+			if m == nil {
+				t.Fatalf("page does not link a versioned %s", name)
+			}
+			versioned, hash := m[1], m[2]
+
+			w := h.do(http.MethodGet, versioned, "")
+			if w.Code != http.StatusOK {
+				t.Fatalf("GET %s = %d", versioned, w.Code)
+			}
+			if got := w.Header().Get("Cache-Control"); got != "public, max-age=31536000, immutable" {
+				t.Errorf("versioned Cache-Control = %q", got)
+			}
+			if got := w.Header().Get("ETag"); got != `"`+hash+`"` {
+				t.Errorf("ETag = %q, want %q", got, hash)
+			}
+			if w := h.do(http.MethodGet, versioned, "", withHeader("If-None-Match", `"`+hash+`"`)); w.Code != http.StatusNotModified {
+				t.Errorf("revalidation = %d, want 304", w.Code)
+			}
+
+			// Unversioned and stale URLs still work but must revalidate.
+			for _, u := range []string{"/static/" + name, "/static/" + name + "?v=stale"} {
+				w := h.do(http.MethodGet, u, "")
+				if w.Code != http.StatusOK || w.Header().Get("Cache-Control") != "no-cache" {
+					t.Errorf("GET %s = %d, Cache-Control %q", u, w.Code, w.Header().Get("Cache-Control"))
+				}
+			}
+		})
+	}
+
+	if w := h.do(http.MethodGet, "/static/nope.css", ""); w.Code != http.StatusNotFound {
+		t.Errorf("missing asset = %d, want 404", w.Code)
 	}
 }

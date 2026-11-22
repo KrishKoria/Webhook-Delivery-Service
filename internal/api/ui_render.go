@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"html/template"
 	"io/fs"
+	"maps"
 	"path"
 	"strings"
 	"time"
@@ -25,11 +26,14 @@ type uiRenderer struct {
 	partials *template.Template
 }
 
-// NewUIRenderer parses the admin UI templates from fsys.
+// NewUIRenderer parses the admin UI templates from fsys. Templates link static
+// files with {{asset "styles.css"}}, which resolves through assets.
 // Render a page with c.HTML(code, "<page name>", data) and a fragment with
 // c.HTML(code, "partial:<template name>", data).
-func NewUIRenderer(fsys fs.FS) (render.HTMLRender, error) {
-	partials, err := template.New("partials").Funcs(uiFuncs).ParseFS(fsys, "partials/*.html")
+func NewUIRenderer(fsys fs.FS, assets *StaticAssets) (render.HTMLRender, error) {
+	funcs := maps.Clone(uiFuncs)
+	funcs["asset"] = assets.URL
+	partials, err := template.New("partials").Funcs(funcs).ParseFS(fsys, "partials/*.html")
 	if err != nil {
 		return nil, fmt.Errorf("parse partials: %w", err)
 	}
@@ -40,7 +44,7 @@ func NewUIRenderer(fsys fs.FS) (render.HTMLRender, error) {
 	r := &uiRenderer{pages: make(map[string]*template.Template, len(pageFiles)), partials: partials}
 	for _, file := range pageFiles {
 		name := strings.TrimSuffix(path.Base(file), ".html")
-		t, err := template.New(name).Funcs(uiFuncs).ParseFS(fsys, "layouts/base.html", "partials/*.html", file)
+		t, err := template.New(name).Funcs(funcs).ParseFS(fsys, "layouts/base.html", "partials/*.html", file)
 		if err != nil {
 			return nil, fmt.Errorf("parse page %s: %w", name, err)
 		}
