@@ -26,7 +26,7 @@ type subCtx struct {
 
 // loadSub fetches the :id subscription or renders a 404 and returns false.
 func (u *UI) loadSub(c *gin.Context) (database.Subscription, bool) {
-	sub, err := u.Q.UIGetSubscription(c, c.Param("id"))
+	sub, err := u.Q.UIGetSubscription(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		u.failErr(c, "Subscription", err)
 		return sub, false
@@ -42,7 +42,7 @@ type subsView struct {
 // ListSubscriptions handles GET /ui/subscriptions.
 func (u *UI) ListSubscriptions(c *gin.Context) {
 	page := pageParam(c)
-	subs, err := u.Q.UIListSubscriptions(c, database.UIListSubscriptionsParams{
+	subs, err := u.Q.UIListSubscriptions(c.Request.Context(), database.UIListSubscriptionsParams{
 		Lim: subsPerPage + 1, Off: int64((page - 1) * subsPerPage),
 	})
 	if err != nil {
@@ -136,7 +136,7 @@ func (u *UI) CreateSubscription(c *gin.Context) {
 			u.page(c, "New subscription", "subscriptions", &f))
 		return
 	}
-	err := u.Q.UICreateSubscription(c, database.UICreateSubscriptionParams{
+	err := u.Q.UICreateSubscription(c.Request.Context(), database.UICreateSubscriptionParams{
 		ID:         uuid.NewString(),
 		TargetUrl:  f.TargetURL,
 		Secret:     sql.NullString{String: secret, Valid: secret != ""},
@@ -183,7 +183,7 @@ func (u *UI) UpdateSubscription(c *gin.Context) {
 	if secret != "" {
 		in.Secret = &secret
 	}
-	if err := u.Ops.UpdateSubscription(c, in); err != nil {
+	if err := u.Ops.UpdateSubscription(c.Request.Context(), in); err != nil {
 		u.failErr(c, "Subscription", err)
 		return
 	}
@@ -192,7 +192,7 @@ func (u *UI) UpdateSubscription(c *gin.Context) {
 
 // DeleteSubscription handles POST /ui/subscriptions/:id/delete.
 func (u *UI) DeleteSubscription(c *gin.Context) {
-	if err := u.Ops.DeleteSubscription(c, c.Param("id")); err != nil {
+	if err := u.Ops.DeleteSubscription(c.Request.Context(), c.Param("id")); err != nil {
 		u.failErr(c, "Subscription", err)
 		return
 	}
@@ -212,14 +212,14 @@ func (u *UI) ResumeSubscription(c *gin.Context) { u.setPaused(c, false) }
 
 func (u *UI) setPaused(c *gin.Context, paused bool) {
 	id := c.Param("id")
-	if err := u.Ops.SetPaused(c, id, paused); err != nil {
+	if err := u.Ops.SetPaused(c.Request.Context(), id, paused); err != nil {
 		u.failErr(c, "Subscription", err)
 		return
 	}
 	flash := map[bool]string{true: "sub_paused", false: "sub_resumed"}[paused]
 	ret := c.PostForm("return")
 	if isHX(c) && ret == "list" {
-		sub, err := u.Q.UIGetSubscription(c, id)
+		sub, err := u.Q.UIGetSubscription(c.Request.Context(), id)
 		if err != nil {
 			u.failErr(c, "Subscription", err)
 			return
@@ -291,7 +291,7 @@ func (u *UI) SendTest(c *gin.Context) {
 		u.showForm(c, http.StatusUnprocessableEntity, "send_test", "test_form", u.page(c, "Send test", "subscriptions", &f))
 		return
 	}
-	if _, _, err := u.Ops.Enqueue(c, ops.EnqueueInput{SubscriptionID: sub.ID, Payload: f.Payload, EventType: f.EventType}); err != nil {
+	if _, _, err := u.Ops.Enqueue(c.Request.Context(), ops.EnqueueInput{SubscriptionID: sub.ID, Payload: f.Payload, EventType: f.EventType}); err != nil {
 		u.failErr(c, "the test event", err)
 		return
 	}
@@ -348,7 +348,7 @@ func (u *UI) Logs(c *gin.Context) {
 	if ts, id, ok := parseLogCursor(c.Query("before")); ok {
 		params.BeforeTs, params.BeforeID, v.Older = ts, id, true
 	}
-	rows, err := u.Q.UIListDeliveryLogs(c, params)
+	rows, err := u.Q.UIListDeliveryLogs(c.Request.Context(), params)
 	if err != nil {
 		u.failErr(c, "delivery logs", err)
 		return
@@ -398,7 +398,7 @@ func withQuery(path string, vals url.Values) string {
 
 // Redeliver handles POST /ui/tasks/:task_id/redeliver.
 func (u *UI) Redeliver(c *gin.Context) {
-	newID, err := u.Ops.Redeliver(c, c.Param("task_id"))
+	newID, err := u.Ops.Redeliver(c.Request.Context(), c.Param("task_id"))
 	if err != nil {
 		u.failErr(c, "Delivery task", err)
 		return
@@ -408,7 +408,7 @@ func (u *UI) Redeliver(c *gin.Context) {
 		return
 	}
 	target := "/ui/subscriptions"
-	if t, err := u.Q.UIGetDeliveryTask(c, newID); err == nil {
+	if t, err := u.Q.UIGetDeliveryTask(c.Request.Context(), newID); err == nil {
 		target = "/ui/subscriptions/" + url.PathEscape(t.SubscriptionID) + "/logs"
 	}
 	u.redirect(c, target, "redelivered", -1)
@@ -459,18 +459,18 @@ func (u *UI) Analytics(c *gin.Context) {
 	}
 
 	var err error
-	v.Attempts, err = u.Q.UIAttemptStatsForSubscription(c, database.UIAttemptStatsForSubscriptionParams{SubscriptionID: sub.ID, Hours: v.Hours})
+	v.Attempts, err = u.Q.UIAttemptStatsForSubscription(c.Request.Context(), database.UIAttemptStatsForSubscriptionParams{SubscriptionID: sub.ID, Hours: v.Hours})
 	u.degrade(c, p, "delivery attempts", err)
 	v.Total = v.Attempts.Successful + v.Attempts.Failed
 	if v.Total > 0 {
 		v.SuccessRate = float64(v.Attempts.Successful) / float64(v.Total) * 100
 	}
-	v.Tasks, err = u.Q.UITaskStatusCountsForSubscription(c, sub.ID)
+	v.Tasks, err = u.Q.UITaskStatusCountsForSubscription(c.Request.Context(), sub.ID)
 	u.degrade(c, p, "task counts", err)
 	v.TaskTotal = v.Tasks.Pending + v.Tasks.InFlight + v.Tasks.Delivered + v.Tasks.Failed
-	v.DLQ, err = u.Q.UIDLQCountsForSubscription(c, sub.ID)
+	v.DLQ, err = u.Q.UIDLQCountsForSubscription(c.Request.Context(), sub.ID)
 	u.degrade(c, p, "dead letter counts", err)
-	v.Failures, err = u.Q.UIRecentFailuresForSubscription(c, database.UIRecentFailuresForSubscriptionParams{SubscriptionID: sub.ID, Lim: 15})
+	v.Failures, err = u.Q.UIRecentFailuresForSubscription(c.Request.Context(), database.UIRecentFailuresForSubscriptionParams{SubscriptionID: sub.ID, Lim: 15})
 	u.degrade(c, p, "recent failures", err)
 
 	p.Data = v

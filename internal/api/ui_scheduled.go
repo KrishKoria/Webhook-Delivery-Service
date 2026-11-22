@@ -36,7 +36,7 @@ func (u *UI) ListScheduled(c *gin.Context) {
 		return
 	}
 	v.Global = true
-	v.Counts, _ = u.Q.UIScheduledCounts(c)
+	v.Counts, _ = u.Q.UIScheduledCounts(c.Request.Context())
 	p.Data = v
 	c.HTML(http.StatusOK, "scheduled", p)
 }
@@ -59,7 +59,7 @@ func (u *UI) SubscriptionScheduled(c *gin.Context) {
 
 func (u *UI) loadScheduled(c *gin.Context, p *ViewPage, subID, path string) (scheduledView, bool) {
 	page := pageParam(c)
-	rows, err := u.Q.UIListScheduled(c, database.UIListScheduledParams{
+	rows, err := u.Q.UIListScheduled(c.Request.Context(), database.UIListScheduledParams{
 		SubscriptionID: subID, Lim: scheduledPerPage + 1, Off: int64((page - 1) * scheduledPerPage),
 	})
 	if err != nil {
@@ -99,21 +99,21 @@ func scheduledReturn(c *gin.Context) string {
 // CancelScheduled handles POST /ui/scheduled/:id/cancel. Only pending rows change.
 func (u *UI) CancelScheduled(c *gin.Context) {
 	id := c.Param("id")
-	n, err := u.Q.UICancelScheduled(c, id)
+	n, err := u.Q.UICancelScheduled(c.Request.Context(), id)
 	if err != nil {
 		u.failErr(c, "Scheduled webhook", err)
 		return
 	}
 	status, flash := http.StatusOK, "sched_cancelled"
 	if n == 0 {
-		if _, err := u.Q.UIGetScheduled(c, id); err != nil {
+		if _, err := u.Q.UIGetScheduled(c.Request.Context(), id); err != nil {
 			u.failErr(c, "Scheduled webhook", err)
 			return
 		}
 		status, flash = http.StatusConflict, "sched_conflict"
 	}
 	if isHX(c) {
-		row, err := u.Q.UIGetScheduled(c, id)
+		row, err := u.Q.UIGetScheduled(c.Request.Context(), id)
 		if err != nil {
 			u.failErr(c, "Scheduled webhook", err)
 			return
@@ -129,7 +129,7 @@ func (u *UI) CancelScheduled(c *gin.Context) {
 
 // DeleteScheduled handles POST /ui/scheduled/:id/delete.
 func (u *UI) DeleteScheduled(c *gin.Context) {
-	n, err := u.Q.UIDeleteScheduled(c, c.Param("id"))
+	n, err := u.Q.UIDeleteScheduled(c.Request.Context(), c.Param("id"))
 	if err == nil && n == 0 {
 		err = ops.ErrNotFound
 	}
@@ -237,7 +237,7 @@ func (u *UI) CreateScheduled(c *gin.Context) {
 		return
 	}
 	rec := sql.NullString{String: f.Recurrence, Valid: f.Recurrence != "none"}
-	err := u.Q.UICreateScheduled(c, database.UICreateScheduledParams{
+	err := u.Q.UICreateScheduled(c.Request.Context(), database.UICreateScheduledParams{
 		ID: uuid.NewString(), SubscriptionID: sub.ID, Payload: f.Payload,
 		ScheduledFor: at.UTC().Format(time.RFC3339), Recurrence: rec,
 	})

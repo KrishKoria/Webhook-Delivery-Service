@@ -145,7 +145,7 @@ func (u *UI) degrade(c *gin.Context, p *ViewPage, what string, err error) {
 	if err == nil {
 		return
 	}
-	u.Log.ErrorContext(c, "ui query failed", "section", what, "err", err)
+	u.Log.ErrorContext(c.Request.Context(), "ui query failed", "section", what, "err", err)
 	p.Degraded = append(p.Degraded, what)
 }
 
@@ -189,7 +189,7 @@ func (u *UI) failErr(c *gin.Context, what string, err error) {
 	case errors.Is(err, ops.ErrNotFound), errors.Is(err, sql.ErrNoRows):
 		u.fail(c, http.StatusNotFound, what+" not found. It may have been deleted.")
 	default:
-		u.Log.ErrorContext(c, "ui request failed", "what", what, "err", err)
+		u.Log.ErrorContext(c.Request.Context(), "ui request failed", "what", what, "err", err)
 		u.fail(c, http.StatusInternalServerError, "Something went wrong loading "+what+". Try again in a moment.")
 	}
 }
