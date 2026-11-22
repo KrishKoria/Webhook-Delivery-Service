@@ -20,6 +20,20 @@ func TestSignReferenceVector(t *testing.T) {
 	}
 }
 
+// Test vector published with the Standard Webhooks specification; also
+// reproduced with openssl using the base64-decoded key.
+func TestSignStandardWebhooksVector(t *testing.T) {
+	got := Sign("whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw", "msg_p5jXN8AQM9LWM0D4loKWxJek", 1614265330, []byte(`{"test": 2432232314}`))
+	const want = "v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE="
+	if got != want {
+		t.Fatalf("Sign = %q, want %q", got, want)
+	}
+	// A malformed whsec_ value falls back to raw bytes instead of failing.
+	if Sign("whsec_!!", "m", 1, nil) != Sign("whsec_!!", "m", 1, nil) || string(SigningKey("whsec_!!")) != "whsec_!!" {
+		t.Fatal("malformed whsec_ secret should be used as raw bytes")
+	}
+}
+
 func TestBackoffDelayIsTotalAndMatchesSchedule(t *testing.T) {
 	identity := func(d time.Duration) time.Duration { return d }
 	want := []time.Duration{10 * time.Second, 30 * time.Second, time.Minute, 5 * time.Minute, 15 * time.Minute}

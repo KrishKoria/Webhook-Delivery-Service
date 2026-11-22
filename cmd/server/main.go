@@ -99,9 +99,14 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	// its in-flight work has finished (the delivery worker also releases tasks it
 	// claimed but never started), so wg lets shutdown wait for them.
 	// Config comes from env: WORKER_*, WEBHOOK_*, *_RETENTION_* (see package delivery).
+	// Leave ~2s of the shutdown budget for releasing aborted tasks.
+	shutdownTimeout := envDuration("SHUTDOWN_TIMEOUT", 9*time.Second)
+	workerCfg := delivery.LoadWorkerConfigFromEnv()
+	workerCfg.DrainTimeout = max(shutdownTimeout-2*time.Second, time.Second)
+
 	var wg sync.WaitGroup
 	for _, start := range []func(context.Context){
-		delivery.NewWorker(db.DB, subCache, delivery.LoadWorkerConfigFromEnv()).Start,
+		delivery.NewWorker(db.DB, subCache, workerCfg).Start,
 		delivery.NewCleanupWorker(db.DB, delivery.LoadCleanupConfigFromEnv()).Start,
 		delivery.NewScheduledWorker(db.DB).Start,
 	} {
@@ -133,9 +138,8 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	case <-ctx.Done():
 	}
 
-	timeout := envDuration("SHUTDOWN_TIMEOUT", 9*time.Second)
-	slog.Info("shutting down", "timeout", timeout)
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), timeout)
+	slog.Info("shutting down", "timeout", shutdownTimeout, "drain", workerCfg.DrainTimeout)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("http server shutdown", "err", err)

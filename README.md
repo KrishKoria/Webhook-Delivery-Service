@@ -236,11 +236,24 @@ Admin endpoints live under `/api` and need HTTP Basic auth. Requests with a body
  Returns `202` with a `task_id`. Repeating the same `Idempotency-Key` returns `200` with the original `task_id` instead of queueing twice.
 
  ### Verify a Delivery (receiver side)
- Each delivery carries `webhook-id`, `webhook-timestamp` and `webhook-signature: v1,<base64>`. The signature is HMAC-SHA256 over `{webhook-id}.{webhook-timestamp}.{raw body}`, keyed with the subscription secret's UTF-8 bytes:
+ Each delivery carries `webhook-id`, `webhook-timestamp` and `webhook-signature: v1,<base64>`. The signature is HMAC-SHA256 over `{webhook-id}.{webhook-timestamp}.{raw body}`. The HMAC key depends on the secret's format:
+
+ | Secret | HMAC key |
+ |---|---|
+ | `whsec_<base64>` (what `rotate-secret` issues) | the **base64-decoded** bytes after `whsec_`, as in the Standard Webhooks spec |
+ | anything else (a secret you chose, or an older hex secret) | the secret's UTF-8 bytes |
+
+ With a `whsec_` secret you can use an official [Standard Webhooks library](https://github.com/standard-webhooks/standard-webhooks) as is. By hand:
  ```python
- expected = "v1," + base64.b64encode(hmac.new(secret.encode(), f"{wid}.{ts}.".encode() + body, hashlib.sha256).digest()).decode()
+ def signing_key(secret: str) -> bytes:
+     if secret.startswith("whsec_"):
+         return base64.b64decode(secret[len("whsec_"):])
+     return secret.encode()
+
+ expected = "v1," + base64.b64encode(hmac.new(signing_key(secret), f"{wid}.{ts}.".encode() + body, hashlib.sha256).digest()).decode()
  ok = any(hmac.compare_digest(expected, s) for s in signature_header.split())
  ```
+ After rotating to a `whsec_` secret, update the receiver's key handling too, or every check fails. Inbound `X-Hub-Signature-256` on `/ingest` always uses the secret text itself as the key.
  Reject timestamps more than a few minutes old to stop replays, and de-duplicate on `webhook-id` (it stays the same across retries).
 
  ### Schedule a Webhook

@@ -171,6 +171,22 @@ func (o *Ops) SetPaused(ctx context.Context, subscriptionID string, paused bool)
 	return nil
 }
 
+// SetSecret replaces only a subscription's signing secret.
+func (o *Ops) SetSecret(ctx context.Context, subscriptionID, secret string) error {
+	n, err := o.Q.SetSubscriptionSecret(ctx, database.SetSubscriptionSecretParams{
+		ID:     subscriptionID,
+		Secret: sql.NullString{String: secret, Valid: secret != ""},
+	})
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	o.invalidate(subscriptionID)
+	return nil
+}
+
 // UpdateSubscriptionInput changes a subscription. A nil Secret keeps the existing one.
 type UpdateSubscriptionInput struct {
 	ID          string

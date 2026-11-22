@@ -149,7 +149,11 @@ UPDATE dead_letter_tasks
 SET status = 'retried',
     last_attempt_at = CURRENT_TIMESTAMP,
     attempt_count = attempt_count + 1,
-    error_details = ?1
+    -- Append the retry note; the original failure stays readable.
+    error_details = CASE
+        WHEN error_details IS NULL OR error_details = '' THEN ?1
+        ELSE error_details || char(10) || ?1
+    END
 WHERE id = ?2 AND status = 'dead'
 RETURNING id, original_task_id, subscription_id, payload, failed_at, reason, last_attempt_at, attempt_count, status, target_url, event_type, error_details
 `
@@ -193,6 +197,25 @@ type SetSubscriptionPausedParams struct {
 
 func (q *Queries) SetSubscriptionPaused(ctx context.Context, arg SetSubscriptionPausedParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, setSubscriptionPaused, arg.Paused, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const setSubscriptionSecret = `-- name: SetSubscriptionSecret :execrows
+UPDATE subscriptions
+SET secret = ?1, updated_at = CURRENT_TIMESTAMP
+WHERE id = ?2
+`
+
+type SetSubscriptionSecretParams struct {
+	Secret sql.NullString
+	ID     string
+}
+
+func (q *Queries) SetSubscriptionSecret(ctx context.Context, arg SetSubscriptionSecretParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setSubscriptionSecret, arg.Secret, arg.ID)
 	if err != nil {
 		return 0, err
 	}

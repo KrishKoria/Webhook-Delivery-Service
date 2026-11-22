@@ -54,9 +54,11 @@ WHERE status = 'pending' AND scheduled_for <= CURRENT_TIMESTAMP
 ORDER BY scheduled_for
 LIMIT sqlc.arg(max_rows);
 
--- name: ClaimScheduledWebhooks :many
--- Only rows still pending are returned, so concurrent schedulers never fire a row twice.
+-- name: ClaimScheduledWebhook :one
+-- Claims one due row inside the transaction that enqueues its delivery task.
+-- Returns no row when another scheduler already won it; a rolled-back
+-- transaction leaves the row pending, so the next tick retries it.
 UPDATE scheduled_webhooks
 SET status = 'enqueued', updated_at = CURRENT_TIMESTAMP
-WHERE status = 'pending' AND id IN (sqlc.slice(ids))
+WHERE id = sqlc.arg(id) AND status = 'pending' AND scheduled_for <= CURRENT_TIMESTAMP
 RETURNING *;

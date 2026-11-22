@@ -83,6 +83,8 @@ func TestValidateTargetURLWithResolver(t *testing.T) {
 		{"http://169.254.169.254/latest/meta-data", true},
 		{"http://127.0.0.1:3000/hook", true},
 		{"http://[::1]/hook", true},
+		{"http://[::1%25lo]:8080/internal", true},  // zone IDs must not bypass the prefix checks
+		{"http://[fe80::1%25eth0]/hook", true},
 		{"http://unknown.test/hook", true}, // NXDOMAIN
 		{"ftp://public.test/file", true},
 		{"file:///etc/passwd", true},

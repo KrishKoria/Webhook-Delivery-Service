@@ -298,9 +298,9 @@ func TestStaleOwnerFinalizeIsRejected(t *testing.T) {
 func TestEndToEndRetriesThenDelivers(t *testing.T) {
 	conn, q := testdb.New(t)
 	var (
-		calls   atomic.Int32
-		mu      sync.Mutex
-		lastReq *http.Request
+		calls    atomic.Int32
+		mu       sync.Mutex
+		lastReq  *http.Request
 		lastBody []byte
 	)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -566,4 +566,51 @@ func TestReleaseOnShutdownOfQueuedTask(t *testing.T) {
 		t.Fatalf("released task: %+v", got)
 	}
 	claimOne(t, w) // immediately claimable again
+}
+
+func TestShutdownAbortsDeliveriesPastDrainTimeout(t *testing.T) {
+	conn, q := testdb.New(t)
+	started := make(chan struct{}, 1)
+	unblock := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		started <- struct{}{}
+		select { // a receiver slower than the whole shutdown budget
+		case <-unblock:
+		case <-time.After(10 * time.Second):
+		}
+	}))
+	defer srv.Close()
+	defer close(unblock)
+	insertSub(t, conn, "s1", srv.URL, "k")
+	insertTask(t, q, "t1", "s1", "")
+
+	stop := runWorker(t, testWorker(conn, "w1", WorkerConfig{Concurrency: 1, DrainTimeout: 200 * time.Millisecond}))
+	<-started
+	begin := time.Now()
+	stop()
+	if took := time.Since(begin); took > 3*time.Second {
+		t.Fatalf("shutdown took %v; the drain timeout did not abort the request", took)
+	}
+	got := getTask(t, q, "t1")
+	if got.Status != StatusPending || got.ClaimedBy.Valid || got.LeaseUntil.Valid || got.AttemptCount != 0 {
+		t.Fatalf("aborted task should be released uncounted for immediate pickup: %+v", got)
+	}
+	if n := countRows(t, conn, `SELECT COUNT(*) FROM delivery_logs`); n != 0 {
+		t.Fatalf("an aborted request logged %d attempts", n)
+	}
+}
+
+// A pre-009 worker leaves its claimed task 'pending' with a live lease. During a
+// rolling deploy the new engine must not claim it until that lease expires.
+func TestLegacyLeasedPendingTaskIsNotClaimed(t *testing.T) {
+	conn, q := testdb.New(t)
+	insertSub(t, conn, "s1", "http://example.invalid/", "")
+	insertTask(t, q, "t1", "s1", "")
+	mustExec(t, conn, `UPDATE delivery_tasks SET lease_until = datetime('now', '+60 seconds'), claimed_by = 'legacy' WHERE id = 't1'`)
+	w := testWorker(conn, "w1", WorkerConfig{})
+	if tasks, err := w.claimBatch(context.Background(), 5); err != nil || len(tasks) != 0 {
+		t.Fatalf("claimed %d legacy-leased tasks (err %v), want 0", len(tasks), err)
+	}
+	mustExec(t, conn, `UPDATE delivery_tasks SET lease_until = datetime('now', '-1 seconds') WHERE id = 't1'`)
+	claimOne(t, w) // claimable once the old lease has expired
 }

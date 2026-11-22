@@ -31,8 +31,13 @@ info:
     | `X-Event-Type` | Event type from ingest, when one was given. |
     | `User-Agent` | `WebhookDeliveryService/1.0` |
 
-    The signature covers `{webhook-id}.{webhook-timestamp}.{raw body}` and is keyed with the
-    subscription secret's UTF-8 bytes. Compare in constant time and reject old timestamps.
+    The signature covers `{webhook-id}.{webhook-timestamp}.{raw body}`. The HMAC key is:
+    - for a `whsec_<base64>` secret (issued by `rotate-secret`): the base64-decoded bytes after
+      `whsec_`, exactly as Standard Webhooks specifies, so official verifier libraries work;
+    - for any other secret (chosen by you, or an older hex secret): its UTF-8 bytes.
+
+    Compare in constant time and reject old timestamps. Inbound `X-Hub-Signature-256` on
+    `/ingest` always keys HMAC with the secret text itself.
 
     Any `2xx` is success. Other responses and network errors are retried after 10s, 30s, 1m,
     5m and 15m (±20% jitter, `Retry-After` honoured up to 1h). After 6 attempts, or on
@@ -187,14 +192,17 @@ paths:
     post:
       tags: [Subscriptions]
       summary: Generate a new signing secret
-      description: The new secret is returned once. Deliveries already in flight keep the old signature.
+      description: |
+        Returns a new Standard Webhooks secret (`whsec_` + base64 of 32 random bytes), once.
+        Receivers must HMAC with the base64-decoded part (see the signing section). Deliveries
+        already in flight keep the old signature.
       parameters: [{ $ref: '#/components/parameters/IdPath' }]
       responses:
         '200':
           description: New secret.
           content:
             application/json:
-              example: { data: { id: 7cc1df9d-8791-4d2e-ae37-0f3d4a333422, secret: 3q2-7w... }, request_id: a1 }
+              example: { data: { id: 7cc1df9d-8791-4d2e-ae37-0f3d4a333422, secret: 'whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw' }, request_id: a1 }
         '404': { $ref: '#/components/responses/NotFound' }
 
   /api/subscriptions/{id}/pause:

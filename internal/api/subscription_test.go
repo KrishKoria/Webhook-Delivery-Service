@@ -1,8 +1,9 @@
 package api
 
 import (
-	"encoding/hex"
+	"encoding/base64"
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -149,8 +150,9 @@ func TestGenerateSecureSecret(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if b, err := hex.DecodeString(secret); err != nil || len(b) != 32 {
-			t.Fatalf("secret %q is not 32 hex-encoded bytes (err %v)", secret, err)
+		rest, ok := strings.CutPrefix(secret, "whsec_")
+		if b, err := base64.StdEncoding.DecodeString(rest); !ok || err != nil || len(b) != 32 {
+			t.Fatalf("secret %q is not whsec_ + 32 base64 bytes (err %v)", secret, err)
 		}
 		if seen[secret] {
 			t.Fatalf("duplicate secret %q", secret)

@@ -267,9 +267,12 @@ ORDER BY attempt_count ASC;
 
 -- name: SelectClaimableTaskIDs :many
 -- Due pending tasks, plus in_flight tasks whose lease has expired. A NULL
--- next_attempt_at is treated as due (NULLs sort first).
+-- next_attempt_at is treated as due (NULLs sort first). This engine clears
+-- lease_until whenever a task returns to pending; a live lease on a pending row
+-- belongs to a pre-009 worker still delivering it (rolling deploy), so skip it.
 SELECT id FROM delivery_tasks
-WHERE (status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP))
+WHERE (status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP)
+       AND (lease_until IS NULL OR lease_until < CURRENT_TIMESTAMP))
    OR (status = 'in_flight' AND (lease_until IS NULL OR lease_until < CURRENT_TIMESTAMP))
 ORDER BY next_attempt_at
 LIMIT sqlc.arg(max_tasks);
@@ -283,7 +286,8 @@ SET status = 'in_flight',
     claimed_at = CURRENT_TIMESTAMP,
     lease_until = datetime('now', CAST(sqlc.arg(lease_seconds) AS INTEGER) || ' seconds')
 WHERE id IN (sqlc.slice(ids))
-  AND ((status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP))
+  AND ((status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP)
+         AND (lease_until IS NULL OR lease_until < CURRENT_TIMESTAMP))
     OR (status = 'in_flight' AND (lease_until IS NULL OR lease_until < CURRENT_TIMESTAMP)))
 RETURNING *;
 

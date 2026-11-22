@@ -72,45 +72,63 @@ func TestScheduledClaimIsExclusive(t *testing.T) {
 	mustExec(t, conn, `INSERT INTO scheduled_webhooks (id, subscription_id, payload, scheduled_for, recurrence)
 		VALUES ('future', 's1', '{}', datetime('now', '+1 hour'), 'none')`)
 
-	var (
-		mu   sync.Mutex
-		seen = map[string]int{}
-		wg   sync.WaitGroup
-	)
+	var wg sync.WaitGroup
 	for range 4 {
 		w := NewScheduledWorker(conn)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for {
-				rows, err := w.claimDue(context.Background(), 7)
+			for range 50 {
+				fired, err := w.processBatch(context.Background())
 				if err != nil {
 					t.Error(err)
 					return
 				}
-				if len(rows) == 0 {
+				if fired == 0 && countRows(t, conn, `SELECT COUNT(*) FROM scheduled_webhooks WHERE status='pending' AND id != 'future'`) == 0 {
 					return
 				}
-				mu.Lock()
-				for _, r := range rows {
-					seen[r.ID]++
-				}
-				mu.Unlock()
 			}
 		}()
 	}
 	wg.Wait()
 
-	if len(seen) != n {
-		t.Fatalf("claimed %d distinct rows, want %d", len(seen), n)
+	if c := countRows(t, conn, `SELECT COUNT(*) FROM delivery_tasks`); c != n {
+		t.Fatalf("enqueued %d delivery tasks for %d schedules (duplicate or lost fires)", c, n)
 	}
-	for id, c := range seen {
-		if c != 1 {
-			t.Fatalf("row %s claimed %d times", id, c)
-		}
+	if c := countRows(t, conn, `SELECT COUNT(*) FROM scheduled_webhooks WHERE status='enqueued'`); c != n {
+		t.Fatalf("%d rows enqueued, want %d", c, n)
 	}
-	if _, ok := seen["future"]; ok {
+	if c := countRows(t, conn, `SELECT COUNT(*) FROM scheduled_webhooks WHERE id='future' AND status='pending'`); c != 1 {
 		t.Fatal("future row was claimed")
+	}
+}
+
+// A failed fire must leave the row pending (not failed) and keep the recurring
+// chain alive, so the next tick fires it once the fault clears.
+func TestScheduledFireFailureIsRetried(t *testing.T) {
+	conn, _ := testdb.New(t)
+	insertSub(t, conn, "s1", "http://example.invalid/", "")
+	mustExec(t, conn, `INSERT INTO scheduled_webhooks (id, subscription_id, payload, scheduled_for, recurrence)
+		VALUES ('daily', 's1', '{}', datetime('now', '-1 minute'), 'daily')`)
+	mustExec(t, conn, `CREATE TRIGGER boom BEFORE INSERT ON delivery_tasks BEGIN SELECT RAISE(ABORT, 'transient'); END`)
+
+	w := NewScheduledWorker(conn)
+	if fired, err := w.processBatch(context.Background()); err != nil || fired != 0 {
+		t.Fatalf("failing pass fired %d (err %v), want 0", fired, err)
+	}
+	if c := countRows(t, conn, `SELECT COUNT(*) FROM scheduled_webhooks WHERE id='daily' AND status='pending'`); c != 1 {
+		t.Fatal("failed fire did not leave the row pending")
+	}
+	if c := countRows(t, conn, `SELECT COUNT(*) FROM scheduled_webhooks`); c != 1 {
+		t.Fatal("failed fire leaked a next occurrence")
+	}
+
+	mustExec(t, conn, `DROP TRIGGER boom`)
+	if fired, err := w.processBatch(context.Background()); err != nil || fired != 1 {
+		t.Fatalf("recovery pass fired %d (err %v), want 1", fired, err)
+	}
+	if c := countRows(t, conn, `SELECT COUNT(*) FROM scheduled_webhooks WHERE status='pending' AND scheduled_for > CURRENT_TIMESTAMP`); c != 1 {
+		t.Fatal("recurring chain was not re-armed after recovery")
 	}
 }
 

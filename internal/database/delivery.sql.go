@@ -59,7 +59,8 @@ SET status = 'in_flight',
     claimed_at = CURRENT_TIMESTAMP,
     lease_until = datetime('now', CAST(?2 AS INTEGER) || ' seconds')
 WHERE id IN (/*SLICE:ids*/?)
-  AND ((status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP))
+  AND ((status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP)
+         AND (lease_until IS NULL OR lease_until < CURRENT_TIMESTAMP))
     OR (status = 'in_flight' AND (lease_until IS NULL OR lease_until < CURRENT_TIMESTAMP)))
 RETURNING id, subscription_id, payload, created_at, status, last_attempt_at, attempt_count, next_attempt_at, claimed_at, claimed_by, lease_until, event_type, idempotency_key
 `
@@ -1242,7 +1243,8 @@ func (q *Queries) ScheduleTaskRetry(ctx context.Context, arg ScheduleTaskRetryPa
 const selectClaimableTaskIDs = `-- name: SelectClaimableTaskIDs :many
 
 SELECT id FROM delivery_tasks
-WHERE (status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP))
+WHERE (status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP)
+       AND (lease_until IS NULL OR lease_until < CURRENT_TIMESTAMP))
    OR (status = 'in_flight' AND (lease_until IS NULL OR lease_until < CURRENT_TIMESTAMP))
 ORDER BY next_attempt_at
 LIMIT ?1
@@ -1259,7 +1261,9 @@ LIMIT ?1
 // batch deletes select ids first and then act on id IN (...).
 // ---------------------------------------------------------------------------
 // Due pending tasks, plus in_flight tasks whose lease has expired. A NULL
-// next_attempt_at is treated as due (NULLs sort first).
+// next_attempt_at is treated as due (NULLs sort first). This engine clears
+// lease_until whenever a task returns to pending; a live lease on a pending row
+// belongs to a pre-009 worker still delivering it (rolling deploy), so skip it.
 func (q *Queries) SelectClaimableTaskIDs(ctx context.Context, maxTasks int64) ([]string, error) {
 	rows, err := q.db.QueryContext(ctx, selectClaimableTaskIDs, maxTasks)
 	if err != nil {
