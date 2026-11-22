@@ -78,6 +78,7 @@ The API is described by an OpenAPI 3.1 specification: [`doc/api-documentation.ym
 | `CSRF_TRUSTED_ORIGINS` | none | Extra origins allowed to make state-changing admin requests. |
 | `SHUTDOWN_TIMEOUT` | `9s` | Graceful shutdown budget (Cloud Run gives 10s after SIGTERM). |
 | `WEBHOOK_ALLOW_PRIVATE_IPS` | `false` | Allow delivery to loopback/private/link-local targets (SSRF guard). Local testing only. |
+| `PPROF_ADDR` | unset (off) | Serve `net/http/pprof` on its own listener, e.g. `localhost:6060`. For profiling; never publish this port. |
 | `WEBHOOK_TIMEOUT_SECONDS` | `30` | Per-attempt outbound timeout. |
 | `WORKER_CONCURRENCY` | `10` | Parallel deliveries per instance. |
 | `WORKER_MAX_ATTEMPTS` | `6` | Attempts before a task moves to the dead letter queue. |
@@ -104,6 +105,37 @@ The API is described by an OpenAPI 3.1 specification: [`doc/api-documentation.ym
  - **Cloud Ready:** Deployable to Google Cloud Run, Fly.io, Railway, etc.
  - **Dead Letter Queue:** Failed deliveries after max retries are moved to a DLQ for manual review/retry.
  - **Observability:** `/livez` and `/readyz` probes, `/api/health`, `/api/metrics`, structured JSON logging (`log/slog`).
+
+ ---
+## Benchmarks
+
+A load-test suite in [`bench/`](bench/README.md) hammers the service with [k6](https://grafana.com/docs/k6/) and checks that nothing gets lost along the way. It needs only Docker:
+
+```bash
+bench/run.sh            # all 10 cases, about 40 minutes; cleans up its containers and images afterwards
+```
+
+**Baseline** (commit `63700da`, **local SQLite** mode). App container capped at **1 CPU and 512 MB**, about one default Cloud Run instance. Host: i7-11800H, 16 GB, Docker Desktop on Windows. Production runs on Turso, which has a different bottleneck (network round trips), so these numbers describe the SQLite mode.
+
+| What we measured | Result |
+|---|---|
+| Correctness under load | **0 lost events** across about 60,000 accepted. Idempotency: 4,000 concurrent requests on 20 keys produced exactly 20 tasks. The rate limiter admitted 638 of a predicted 640. A 1 MiB + 1 byte body got 413. |
+| Ingest breaking point (ramp to p99 > 500 ms) | Broke within 12 s at about **125 rps**. Ingest median 524 ms (294 ms with Redis). |
+| Sustained ingest + delivery (300 rps offered for 60 s) | Accepted **49/s** with 10 workers, **69/s** with 50 workers, **65/s** with Redis. Ingest p95 26.6 s, 14.9 s and 13.6 s respectively. Every accepted event was delivered. |
+| Admin reads (dashboard, lists, metrics) | p95 **2.7 ms** idle, **31.5 s** while ingest runs |
+| Payload size | 1 KB: 128/s, 64 KB: 88/s (5.6 MB/s), 1 MB: 10/s (10 MB/s). No errors. |
+| Slow or flaky receivers (100 rps) | Ingest p95 stayed at 198 ms, but deliveries capped at 35/s and 3,669 tasks were still waiting after 2 minutes |
+
+**Why:** local SQLite runs on a **single connection** with a rollback journal (`internal/db/db.go`), so every commit waits for an fsync and everything else waits for that commit. A goroutine dump under load shows **998 of 1,561 goroutines blocked in `database/sql.(*DB).conn`**, while the one goroutine holding the connection sits in SQLite's `_full_fsync`. The app used about **13% of its CPU**. It is waiting on the disk, not computing.
+
+**Fix list**, roughly by expected impact:
+1. **WAL journal mode with `synchronous=NORMAL`** for local SQLite, and a separate pool of read connections. This removes the per-commit journal fsync, and readers stop queuing behind writers.
+2. **Load shedding on ingest.** Ingest currently waits as long as it takes; p95 reached 26 s. A short timeout on the database wait plus a fast `503` with `Retry-After` would push back on senders instead of piling up thousands of waiting requests.
+3. **Separate the finalize timeout from the claim timeout.** Under contention a delivery can succeed and then fail to record within the 10 s `dbOpTimeout`. Its lease then expires and the **webhook is delivered again** (16 times in this run).
+4. **Cache subscriptions in-process.** Without Redis, 466 of the waiting goroutines only wanted to read a subscription; Redis raised accepted throughput 32%. A small in-memory cache with a short TTL avoids both the database and the Redis round trip.
+5. **Tune the worker default.** 50 workers delivered 40% more than 10.
+6. **Log rate-limited requests at a lower level, or sample them.** The `rate-limit` case wrote 2,362 WARN lines in 30 s.
+7. **Investigate memory with large payloads.** The app container reached 503 MiB of 512 MiB during the 1 MB phase. The Go heap under steady load is about 23 MB, so this is likely SQLite page cache, but it hasn't been profiled yet.
 
  ---
 ## Redis Caching

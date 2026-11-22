@@ -1,0 +1,65 @@
+# Load-test stack. Driven by bench/run.sh; see bench/README.md.
+# Every knob is an env var so run.sh can vary one thing per scenario.
+name: webhook-bench
+
+services:
+  # The app runs as distroless nonroot (uid 65532); give it a writable volume
+  # on real disk so SQLite fsync costs show up in the numbers.
+  db-init:
+    image: busybox:1.37
+    command: ["chown", "-R", "65532:65532", "/data"]
+    volumes:
+      - bench_db:/data
+
+  app:
+    build: ..
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+      sink:
+        condition: service_started
+    # Roughly a default Cloud Run instance, so results read as "one live instance".
+    cpus: ${BENCH_APP_CPUS:-1}
+    mem_limit: ${BENCH_APP_MEM:-512m}
+    environment:
+      TURSO_DATABASE_URL: file:/data/bench.db
+      MIGRATE_ON_START: "true"
+      LOG_LEVEL: WARN
+      WEBHOOK_ALLOW_PRIVATE_IPS: "true" # the sink is on the private compose network
+      INGEST_RATE_LIMIT_ENABLED: ${BENCH_RATE_LIMIT:-false}
+      INGEST_RATE_LIMIT_RPS: ${BENCH_RATE_LIMIT_RPS:-10}
+      INGEST_RATE_LIMIT_BURST: ${BENCH_RATE_LIMIT_BURST:-20}
+      WORKER_CONCURRENCY: ${BENCH_WORKERS:-10}
+      REDIS_URL: ${BENCH_REDIS_URL:-}
+      PPROF_ADDR: ":6060"
+    ports:
+      - "127.0.0.1:${BENCH_PORT:-18080}:8080"   # open the UI while a run is going
+      - "127.0.0.1:${BENCH_PPROF_PORT:-16060}:6060"
+    volumes:
+      - bench_db:/data
+
+  # Webhook receiver. /status/204 is a fast sink, /delay/200ms a slow one,
+  # /status/200:0.9,500:0.1 a flaky one (weighted random status).
+  sink:
+    image: ghcr.io/mccutchen/go-httpbin:2.26.0
+
+  redis:
+    image: redis:7.4-alpine
+    profiles: ["redis"]
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+
+  k6:
+    image: grafana/k6:2.4.0
+    profiles: ["tools"]
+    depends_on: [app]
+    environment:
+      BASE_URL: http://app:8080
+      SINK_URL: http://sink:8080
+      K6_WEB_DASHBOARD: "true"
+      K6_WEB_DASHBOARD_PERIOD: 2s
+    volumes:
+      - ./k6:/scripts:ro
+      - ./results:/results
+
+volumes:
+  bench_db:

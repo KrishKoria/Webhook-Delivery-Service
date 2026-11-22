@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/signal"
 	"strings"
@@ -94,6 +95,9 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("build router: %w", err)
 	}
+	if addr := os.Getenv("PPROF_ADDR"); addr != "" {
+		go servePprof(ctx, addr)
+	}
 
 	// Background workers stop when ctx is cancelled. Each Start returns only after
 	// its in-flight work has finished (the delivery worker also releases tasks it
@@ -153,6 +157,24 @@ func run(ctx context.Context, logger *slog.Logger) error {
 		slog.Warn("shutdown timeout reached before workers finished")
 	}
 	return nil
+}
+
+// servePprof serves net/http/pprof on its own listener and mux, so profiling is
+// never reachable through the public router. Enabled only when PPROF_ADDR is set.
+func servePprof(ctx context.Context, addr string) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	stop := context.AfterFunc(ctx, func() { _ = srv.Close() })
+	defer stop()
+	slog.Warn("pprof enabled; never expose this port publicly", "addr", addr)
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		slog.Error("pprof server", "err", err)
+	}
 }
 
 func newCache() *cache.RedisSubscriptionCache {
