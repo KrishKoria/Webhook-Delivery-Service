@@ -85,14 +85,21 @@ type TokenBucket struct {
 
 // NewTokenBucket creates a full token bucket.
 func NewTokenBucket(maxTokens, refillRate float64) *TokenBucket {
-	now := time.Now()
+	return newTokenBucketAt(maxTokens, refillRate, time.Now())
+}
+
+func newTokenBucketAt(maxTokens, refillRate float64, now time.Time) *TokenBucket {
 	return &TokenBucket{tokens: maxTokens, maxTokens: maxTokens, refillRate: refillRate, lastRefill: now, lastUsed: now}
 }
 
 // take consumes a token if available. Otherwise it reports how long until one is.
 func (tb *TokenBucket) take(now time.Time) (bool, time.Duration) {
-	tb.tokens = math.Min(tb.maxTokens, tb.tokens+now.Sub(tb.lastRefill).Seconds()*tb.refillRate)
-	tb.lastRefill = now
+	// A caller's clock reading can predate lastRefill (it was taken before a lock);
+	// never let negative elapsed time drain tokens.
+	if elapsed := now.Sub(tb.lastRefill); elapsed > 0 {
+		tb.tokens = math.Min(tb.maxTokens, tb.tokens+elapsed.Seconds()*tb.refillRate)
+		tb.lastRefill = now
+	}
 	tb.lastUsed = now
 	if tb.tokens >= 1 {
 		tb.tokens--
@@ -145,7 +152,7 @@ func (rl *RateLimiter) allow(key string) (bool, time.Duration) {
 		if len(rl.buckets) >= rl.config.MaxBuckets {
 			rl.evictFullestLocked(now)
 		}
-		b = NewTokenBucket(float64(rl.config.BurstSize), rl.config.RequestsPerSecond)
+		b = newTokenBucketAt(float64(rl.config.BurstSize), rl.config.RequestsPerSecond, now)
 		rl.buckets[key] = b
 	}
 	return b.take(now)
