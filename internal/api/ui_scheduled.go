@@ -57,7 +57,7 @@ func (u *UI) SubscriptionScheduled(c *gin.Context) {
 	c.HTML(http.StatusOK, "scheduled", p)
 }
 
-func (u *UI) loadScheduled(c *gin.Context, p *Page, subID, path string) (scheduledView, bool) {
+func (u *UI) loadScheduled(c *gin.Context, p *ViewPage, subID, path string) (scheduledView, bool) {
 	page := pageParam(c)
 	rows, err := u.Q.UIListScheduled(c, database.UIListScheduledParams{
 		SubscriptionID: subID, Lim: scheduledPerPage + 1, Off: int64((page - 1) * scheduledPerPage),
@@ -170,7 +170,7 @@ func (u *UI) NewScheduled(c *gin.Context) {
 	}
 	f := scheduleForm{
 		subCtx:  subCtx{Sub: sub, Tab: "scheduled"},
-		Payload: defaultTestPayload, Recurrence: "none", Recurrences: recurrences, TZOffset: "0",
+		Payload: uiTestPayload, Recurrence: "none", Recurrences: recurrences, TZOffset: "0",
 		Local:    time.Now().UTC().Add(time.Hour).Truncate(time.Minute).Format("2006-01-02T15:04"),
 		MinLocal: time.Now().UTC().Add(-24 * time.Hour).Format("2006-01-02T15:04"),
 	}

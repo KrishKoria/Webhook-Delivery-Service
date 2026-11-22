@@ -143,143 +143,18 @@ func TestValidateTargetURL_ParseError(t *testing.T) {
 }
 
 func TestGenerateSecureSecret(t *testing.T) {
-	// Test that generateSecureSecret produces valid output
-	secret := generateSecureSecret()
-
-	// Should be 64 characters (32 bytes encoded as hex)
-	if len(secret) != 64 {
-		t.Errorf("generateSecureSecret() length = %d, want 64", len(secret))
-	}
-
-	// Should be valid hex encoding
-	decoded, err := hex.DecodeString(secret)
-	if err != nil {
-		t.Errorf("generateSecureSecret() produced invalid hex: %v", err)
-	}
-
-	// Decoded should be 32 bytes
-	if len(decoded) != 32 {
-		t.Errorf("generateSecureSecret() decoded length = %d, want 32", len(decoded))
-	}
-}
-
-func TestGenerateSecureSecret_Uniqueness(t *testing.T) {
-	// Generate multiple secrets and ensure they're all unique
-	secrets := make(map[string]bool)
-	iterations := 100
-
-	for i := 0; i < iterations; i++ {
-		secret := generateSecureSecret()
-		if secrets[secret] {
-			t.Errorf("generateSecureSecret() produced duplicate secret on iteration %d", i)
+	seen := map[string]bool{}
+	for range 100 {
+		secret, err := generateSecureSecret()
+		if err != nil {
+			t.Fatal(err)
 		}
-		secrets[secret] = true
-	}
-}
-
-func TestGenerateSecureSecret_Entropy(t *testing.T) {
-	// Basic entropy check - ensure generated secrets have diverse characters
-	secret := generateSecureSecret()
-	
-	charCounts := make(map[rune]int)
-	for _, c := range secret {
-		charCounts[c]++
-	}
-	
-	// With 64 hex characters, we expect reasonable distribution
-	// A good random generator shouldn't have any single character appear too many times
-	maxCount := 0
-	for _, count := range charCounts {
-		if count > maxCount {
-			maxCount = count
+		if b, err := hex.DecodeString(secret); err != nil || len(b) != 32 {
+			t.Fatalf("secret %q is not 32 hex-encoded bytes (err %v)", secret, err)
 		}
-	}
-	
-	// If any character appears more than 20 times in a 64-char hex string, that's suspicious
-	// (With 16 possible hex chars and 64 chars total, expected average is 4 per char)
-	if maxCount > 20 {
-		t.Errorf("generateSecureSecret() may have low entropy: one character appears %d times", maxCount)
-	}
-}
-
-func TestSubscriptionResponse_NoSecretField(t *testing.T) {
-	// This test verifies that SubscriptionResponse struct does not expose actual secrets
-	// It only has HasSecret (boolean) instead of the actual secret value
-	
-	resp := SubscriptionResponse{
-		ID:         "test-id",
-		TargetURL:  "https://example.com",
-		EventTypes: "push,pull_request",
-		HasSecret:  true,
-		CreatedAt:  "2024-01-01T00:00:00Z",
-	}
-
-	// Verify HasSecret is properly set
-	if resp.HasSecret != true {
-		t.Error("HasSecret should be true")
-	}
-	
-	// Verify other fields are set correctly
-	if resp.ID != "test-id" {
-		t.Errorf("ID = %q, want %q", resp.ID, "test-id")
-	}
-	if resp.TargetURL != "https://example.com" {
-		t.Errorf("TargetURL = %q, want %q", resp.TargetURL, "https://example.com")
-	}
-	
-	// Note: If this test compiles, it means SubscriptionResponse doesn't have a Secret field
-	// (there's no way to set resp.Secret because it doesn't exist)
-}
-
-func TestSubscriptionResponse_HasSecretFalse(t *testing.T) {
-	// Test the case where subscription has no secret
-	resp := SubscriptionResponse{
-		ID:         "test-id",
-		TargetURL:  "https://example.com",
-		EventTypes: "",
-		HasSecret:  false,
-		CreatedAt:  "2024-01-01T00:00:00Z",
-	}
-
-	if resp.HasSecret != false {
-		t.Error("HasSecret should be false when no secret is configured")
-	}
-}
-
-// TestSend handler tests (unit tests for the logic, not integration tests)
-func TestTestSend_DefaultPayload(t *testing.T) {
-	// Test that TestSend uses correct default payload when none provided
-	// This is a documentation test showing the expected defaults
-	
-	expectedDefaultPayload := `{"event":"test","source":"admin_test_send"}`
-	expectedDefaultEventType := "test"
-	
-	// Verify the default values match what we expect
-	if expectedDefaultPayload == "" {
-		t.Error("Default payload should not be empty")
-	}
-	if expectedDefaultEventType == "" {
-		t.Error("Default event type should not be empty")
-	}
-}
-
-func TestTestSend_ResponseStructure(t *testing.T) {
-	// Test that TestSend response contains expected fields and no secrets
-	// This is a compile-time verification that the response structure is correct
-	
-	// Expected response fields from TestSend:
-	// - task_id: string (UUID)
-	// - subscription_id: string
-	// - status: "queued"
-	
-	// The response should NOT contain:
-	// - secret
-	// - target_url (except in subscription context)
-	// - any sensitive information
-	
-	// This test verifies the response pattern is documented
-	expectedStatus := "queued"
-	if expectedStatus != "queued" {
-		t.Error("TestSend should return status 'queued'")
+		if seen[secret] {
+			t.Fatalf("duplicate secret %q", secret)
+		}
+		seen[secret] = true
 	}
 }

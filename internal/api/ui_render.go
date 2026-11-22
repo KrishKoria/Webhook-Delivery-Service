@@ -123,16 +123,16 @@ func asTime(v any) (time.Time, bool) {
 	case sql.NullTime:
 		return x.Time, x.Valid && !x.Time.IsZero()
 	case string:
-		return parseDBTime(x)
+		return parseDBTimeUTC(x)
 	case []byte:
-		return parseDBTime(string(x))
+		return parseDBTimeUTC(string(x))
 	}
 	return time.Time{}, false
 }
 
 // parseDBTime parses the timestamp encodings SQLite drivers hand back for
 // aggregates, where the declared column type is lost.
-func parseDBTime(s string) (time.Time, bool) {
+func parseDBTimeUTC(s string) (time.Time, bool) {
 	for _, layout := range []string{time.DateTime, time.RFC3339Nano, "2006-01-02 15:04:05.999999999-07:00", "2006-01-02T15:04:05"} {
 		if t, err := time.ParseInLocation(layout, s, time.UTC); err == nil {
 			return t, true
