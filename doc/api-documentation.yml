@@ -7,8 +7,9 @@ info:
     target URL with retries, signing, scheduling and a dead letter queue.
 
     ## Authentication
-    Everything except `/ingest/*` and the health probes requires **HTTP Basic** auth with
-    `ADMIN_USERNAME` / `ADMIN_PASSWORD`. The server refuses to start without them.
+    Admin auth is optional. When the server is started with `ADMIN_USERNAME` and
+    `ADMIN_PASSWORD`, everything except `/ingest/*` and the health probes requires
+    **HTTP Basic** auth with those credentials. Without them, the admin routes are open.
 
     ## Conventions
     - Request bodies on `/api/*` must be `application/json` (otherwise `415`).

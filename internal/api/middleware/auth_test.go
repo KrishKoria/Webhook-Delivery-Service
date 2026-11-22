@@ -91,28 +91,27 @@ func TestLoadAdminAuthConfig(t *testing.T) {
 		wantErr      bool
 		wantDisabled bool
 	}{
-		{name: "nothing set fails closed", wantErr: true},
-		{name: "only username fails closed", env: map[string]string{"ADMIN_USERNAME": "a"}, wantErr: true},
+		{name: "nothing set leaves auth off", wantDisabled: true},
+		{name: "only username is an error", env: map[string]string{"ADMIN_USERNAME": "a"}, wantErr: true},
+		{name: "only password is an error", env: map[string]string{"ADMIN_PASSWORD": "b"}, wantErr: true},
 		{name: "credentials enable auth", env: map[string]string{"ADMIN_USERNAME": "a", "ADMIN_PASSWORD": "b"}},
-		{name: "explicitly disabled", env: map[string]string{"ADMIN_AUTH_DISABLED": "true"}, wantDisabled: true},
-		// A leftover ADMIN_AUTH_ENABLED=false from the old deployment must not open the console.
-		{name: "legacy ENABLED=false without creds fails closed", env: map[string]string{"ADMIN_AUTH_ENABLED": "false"}, wantErr: true},
+		// Legacy switches are ignored: credentials alone decide.
+		{name: "legacy DISABLED=true with creds keeps auth on", env: map[string]string{"ADMIN_AUTH_DISABLED": "true", "ADMIN_USERNAME": "a", "ADMIN_PASSWORD": "b"}},
 		{name: "legacy ENABLED=false with creds keeps auth on", env: map[string]string{"ADMIN_AUTH_ENABLED": "false", "ADMIN_USERNAME": "a", "ADMIN_PASSWORD": "b"}},
-		{name: "legacy ENABLED=true without creds fails closed", env: map[string]string{"ADMIN_AUTH_ENABLED": "true"}, wantErr: true},
+		{name: "legacy ENABLED=true without creds leaves auth off", env: map[string]string{"ADMIN_AUTH_ENABLED": "true"}, wantDisabled: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			for _, k := range []string{"ADMIN_USERNAME", "ADMIN_PASSWORD", "ADMIN_AUTH_DISABLED", "ADMIN_AUTH_ENABLED"} {
-				t.Setenv(k, "")
+				unsetEnv(t, k)
 			}
-			unsetEnv(t, "ADMIN_AUTH_ENABLED")
 			for k, v := range tt.env {
 				t.Setenv(k, v)
 			}
 			cfg, err := LoadAdminAuthConfig(nil)
 			if tt.wantErr {
-				if !errors.Is(err, ErrAdminCredentialsMissing) {
-					t.Fatalf("err = %v, want ErrAdminCredentialsMissing", err)
+				if !errors.Is(err, ErrAdminCredentialsIncomplete) {
+					t.Fatalf("err = %v, want ErrAdminCredentialsIncomplete", err)
 				}
 				return
 			}

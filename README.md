@@ -46,7 +46,7 @@
 
 
  4. **Access the app:**
-    - Open [http://localhost:8080](http://localhost:8080) (redirects to the `/ui/dashboard` overview). Sign in with `ADMIN_USERNAME` / `ADMIN_PASSWORD`.
+    - Open [http://localhost:8080](http://localhost:8080) (redirects to the `/ui/dashboard` overview). No login is needed unless you set `ADMIN_USERNAME` / `ADMIN_PASSWORD`.
 
  ---
 
@@ -68,8 +68,7 @@ The API is described by an OpenAPI 3.1 specification: [`doc/api-documentation.ym
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `ADMIN_USERNAME`, `ADMIN_PASSWORD` | **required** | HTTP Basic credentials for `/api/*` and `/ui/*`. The server **refuses to start** without them. |
-| `ADMIN_AUTH_DISABLED` | `false` | Local development only: opens every admin route (logs a warning). |
+| `ADMIN_USERNAME`, `ADMIN_PASSWORD` | unset (open) | Optional HTTP Basic credentials for `/api/*` and `/ui/*`. Unset, the admin console is open to anyone (logged as a warning). Set both to require a login; setting only one stops the server at startup. |
 | `TURSO_DATABASE_URL` | | `libsql://`, `turso://` or `https://` for Turso; `file:./dev.db` for local SQLite. |
 | `TURSO_AUTH_TOKEN` | | Turso token (empty for `file:`). |
 | `MIGRATE_ON_START` | `true` | Apply embedded goose migrations at boot. Set `false` and run `webhook-delivery-service migrate` when several instances share a DB. |
@@ -202,7 +201,7 @@ For these reasons, for any development beyond very quick, isolated tests, using 
 
  ## Sample API Usage
 
-Admin endpoints live under `/api` and need HTTP Basic auth. Requests with a body must be `application/json`.
+Admin endpoints live under `/api`. The `-u` flag below is only needed when admin credentials are configured. Requests with a body must be `application/json`.
 
  ### Create a Subscription
  ```bash
@@ -337,11 +336,11 @@ Admin endpoints live under `/api` and need HTTP Basic auth. Requests with a body
    --platform managed \
    --region <YOUR_REGION> \
    --allow-unauthenticated \
-   --set-env-vars TURSO_DATABASE_URL=<YOUR_DATABASE_URL>,REDIS_URL=<YOUR_REDIS_URL>,ADMIN_USERNAME=<USER> \
-   --set-secrets TURSO_AUTH_TOKEN=turso-token:latest,ADMIN_PASSWORD=admin-password:latest
+   --set-env-vars TURSO_DATABASE_URL=<YOUR_DATABASE_URL>,REDIS_URL=<YOUR_REDIS_URL> \
+   --set-secrets TURSO_AUTH_TOKEN=turso-token:latest
  ```
 
- > **The service will not start without `ADMIN_USERNAME` and `ADMIN_PASSWORD`.** Set them before deploying a new revision, otherwise the revision fails its startup probe. Prefer Secret Manager (`--set-secrets`) for the password and Turso token. `--allow-unauthenticated` only opens the network path: `/ingest` stays public, while `/api` and `/ui` still require the admin credentials.
+ > **Admin auth is off unless you configure it.** As deployed above, `/api` and `/ui` are open to anyone with the URL, which suits a public demo. To lock them down, add `ADMIN_USERNAME=<USER>` to `--set-env-vars` and `ADMIN_PASSWORD=admin-password:latest` to `--set-secrets` (prefer Secret Manager for the password and Turso token). `/ingest` is always public.
 
  ### 3. **Access the Service**
  After deployment, you will receive a URL for your service. You can access the UI and API at 
