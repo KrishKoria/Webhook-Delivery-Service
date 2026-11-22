@@ -10,17 +10,19 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// BacklogHandler handles backlog and retry visibility endpoints.
+// BacklogHandler serves backlog and retry visibility. The active backlog is
+// every unsettled task: status pending or in_flight.
 type BacklogHandler struct {
 	Queries *database.Queries
 }
 
-// BacklogTaskResponse represents a task in the backlog.
+// BacklogTaskResponse is a task in the backlog.
 type BacklogTaskResponse struct {
 	ID              string     `json:"id"`
 	SubscriptionID  string     `json:"subscription_id"`
 	SubscriptionURL string     `json:"subscription_url"`
 	Status          string     `json:"status"`
+	EventType       *string    `json:"event_type,omitempty"`
 	AttemptCount    int64      `json:"attempt_count"`
 	CreatedAt       time.Time  `json:"created_at"`
 	LastAttemptAt   *time.Time `json:"last_attempt_at,omitempty"`
@@ -29,53 +31,47 @@ type BacklogTaskResponse struct {
 	LeaseUntil      *time.Time `json:"lease_until,omitempty"`
 }
 
-// BacklogStatsResponse represents backlog statistics.
+// BacklogStatsResponse summarizes the active backlog. TotalPending counts
+// pending + in_flight; ClaimedTasks is the in_flight subset.
 type BacklogStatsResponse struct {
-	TotalPending    int64   `json:"total_pending"`
+	TotalPending    int64   `json:"total_active"`
+	Pending         int64   `json:"pending"`
+	ClaimedTasks    int64   `json:"in_flight"`
 	NewTasks        int64   `json:"new_tasks"`
 	RetryingTasks   int64   `json:"retrying_tasks"`
-	ClaimedTasks    int64   `json:"claimed_tasks"`
 	WaitingForRetry int64   `json:"waiting_for_retry"`
-	MaxRetryCount   int64   `json:"max_retry_count"`
-	AvgRetryCount   float64 `json:"avg_retry_count"`
+	MaxRetryCount   int64   `json:"max_attempts"`
+	AvgRetryCount   float64 `json:"avg_attempts"`
 }
 
-// BacklogBySubscriptionResponse represents backlog grouped by subscription.
+// BacklogBySubscriptionResponse is the active backlog for one subscription.
 type BacklogBySubscriptionResponse struct {
 	SubscriptionID  string     `json:"subscription_id"`
 	SubscriptionURL string     `json:"subscription_url"`
-	PendingCount    int64      `json:"pending_count"`
+	PendingCount    int64      `json:"active_count"`
+	InFlightCount   int64      `json:"in_flight_count"`
 	RetryingCount   int64      `json:"retrying_count"`
-	MaxRetries      int64      `json:"max_retries"`
+	MaxRetries      int64      `json:"max_attempts"`
 	OldestTask      *time.Time `json:"oldest_task,omitempty"`
 }
 
-// RetryDistributionResponse represents the distribution of retry counts.
+// RetryDistributionResponse is how many active tasks have a given attempt count.
 type RetryDistributionResponse struct {
-	RetryCount int64 `json:"retry_count"`
+	RetryCount int64 `json:"attempt_count"`
 	TaskCount  int64 `json:"task_count"`
 }
 
-// BacklogOverviewResponse represents the full backlog overview.
+// BacklogOverviewResponse is the payload of GET /api/backlog. Degraded is true
+// when a section failed to load and was left empty.
 type BacklogOverviewResponse struct {
-	Timestamp        string                          `json:"timestamp"`
-	Stats            BacklogStatsResponse            `json:"stats"`
-	BySubscription   []BacklogBySubscriptionResponse `json:"by_subscription"`
-	RetryDistribution []RetryDistributionResponse    `json:"retry_distribution"`
+	Timestamp         string                          `json:"timestamp"`
+	Degraded          bool                            `json:"degraded"`
+	Stats             *BacklogStatsResponse           `json:"stats"`
+	BySubscription    []BacklogBySubscriptionResponse `json:"by_subscription"`
+	RetryDistribution []RetryDistributionResponse     `json:"retry_distribution"`
 }
 
-// RegisterBacklogRoutes registers backlog endpoints on a gin.Engine.
-func RegisterBacklogRoutes(r *gin.Engine, h *BacklogHandler) {
-	r.GET("/api/backlog", h.GetBacklogOverview)
-	r.GET("/api/backlog/stats", h.GetBacklogStats)
-	r.GET("/api/backlog/tasks", h.ListBacklogTasks)
-	r.GET("/api/backlog/retrying", h.ListRetryingTasks)
-	r.GET("/api/backlog/active", h.ListActiveClaimedTasks)
-	r.GET("/api/backlog/by-subscription", h.GetBacklogBySubscription)
-	r.GET("/api/backlog/retry-distribution", h.GetRetryDistribution)
-}
-
-// RegisterBacklogRoutesGroup registers backlog endpoints on a RouterGroup.
+// RegisterBacklogRoutesGroup registers the backlog endpoints.
 func RegisterBacklogRoutesGroup(rg *gin.RouterGroup, h *BacklogHandler) {
 	rg.GET("/api/backlog", h.GetBacklogOverview)
 	rg.GET("/api/backlog/stats", h.GetBacklogStats)
@@ -86,11 +82,9 @@ func RegisterBacklogRoutesGroup(rg *gin.RouterGroup, h *BacklogHandler) {
 	rg.GET("/api/backlog/retry-distribution", h.GetRetryDistribution)
 }
 
-// Helper function to convert interface{} to int64
-func interfaceToInt64(v interface{}) int64 {
-	if v == nil {
-		return 0
-	}
+// interfaceToInt64 converts a loosely typed SQL aggregate to int64.
+// Used by the dashboard page handlers.
+func interfaceToInt64(v any) int64 {
 	switch val := v.(type) {
 	case int64:
 		return val
@@ -106,318 +100,194 @@ func interfaceToInt64(v interface{}) int64 {
 	return 0
 }
 
-// Helper to convert interface{} to time.Time pointer
-func interfaceToTime(v interface{}) *time.Time {
-	if v == nil {
-		return nil
-	}
+// interfaceToTime converts a loosely typed SQL timestamp aggregate to *time.Time.
+// Used by the dashboard page handlers.
+func interfaceToTime(v any) *time.Time {
 	switch val := v.(type) {
 	case time.Time:
 		return &val
 	case string:
-		if t, err := time.Parse(time.RFC3339, val); err == nil {
-			return &t
-		}
-		// Try SQLite datetime format
-		if t, err := time.Parse("2006-01-02 15:04:05", val); err == nil {
+		return parseDBTime(val)
+	}
+	return nil
+}
+
+func parseDBTime(s string) *time.Time {
+	for _, layout := range []string{dbTimeLayout, time.RFC3339} {
+		if t, err := time.Parse(layout, s); err == nil {
 			return &t
 		}
 	}
 	return nil
 }
 
-// GetBacklogOverview returns comprehensive backlog information.
+func nullTimePtr(t sql.NullTime) *time.Time {
+	if !t.Valid {
+		return nil
+	}
+	return &t.Time
+}
+
+func toBacklogStats(s database.APIBacklogStatsRow) BacklogStatsResponse {
+	return BacklogStatsResponse{
+		TotalPending: s.TotalActive, Pending: s.Pending, ClaimedTasks: s.InFlight,
+		NewTasks: s.NewTasks, RetryingTasks: s.RetryingTasks, WaitingForRetry: s.WaitingForRetry,
+		MaxRetryCount: s.MaxAttempts, AvgRetryCount: s.AvgAttempts,
+	}
+}
+
+func toBySubscription(rows []database.APIBacklogBySubscriptionRow) []BacklogBySubscriptionResponse {
+	out := make([]BacklogBySubscriptionResponse, len(rows))
+	for i, r := range rows {
+		out[i] = BacklogBySubscriptionResponse{
+			SubscriptionID: r.SubscriptionID, SubscriptionURL: r.SubscriptionUrl,
+			PendingCount: r.ActiveCount, InFlightCount: r.InFlightCount, RetryingCount: r.RetryingCount,
+			MaxRetries: r.MaxAttempts, OldestTask: parseDBTime(r.OldestTask),
+		}
+	}
+	return out
+}
+
+func toRetryDistribution(rows []database.APIRetryDistributionRow) []RetryDistributionResponse {
+	out := make([]RetryDistributionResponse, len(rows))
+	for i, r := range rows {
+		out[i] = RetryDistributionResponse{RetryCount: r.AttemptCount, TaskCount: r.TaskCount}
+	}
+	return out
+}
+
+// GetBacklogOverview handles GET /api/backlog: stats, top 10 subscriptions and
+// retry distribution. Failing sections set degraded:true; all failing is a 500.
 func (h *BacklogHandler) GetBacklogOverview(c *gin.Context) {
+	ctx := c.Request.Context()
 	resp := BacklogOverviewResponse{
-		Timestamp: time.Now().Format(time.RFC3339),
+		Timestamp:         ts(time.Now()),
+		BySubscription:    []BacklogBySubscriptionResponse{},
+		RetryDistribution: []RetryDistributionResponse{},
 	}
-
-	// Get backlog stats
-	stats, err := h.Queries.GetBacklogStats(c)
-	if err == nil {
-		resp.Stats = BacklogStatsResponse{
-			TotalPending:    stats.TotalPending,
-			NewTasks:        nullFloatToInt64(stats.NewTasks),
-			RetryingTasks:   nullFloatToInt64(stats.RetryingTasks),
-			ClaimedTasks:    nullFloatToInt64(stats.ClaimedTasks),
-			WaitingForRetry: nullFloatToInt64(stats.WaitingForRetry),
-			MaxRetryCount:   interfaceToInt64(stats.MaxRetryCount),
-			AvgRetryCount:   stats.AvgRetryCount.Float64,
+	failures := 0
+	track := func(name string, err error) bool {
+		ok := section(c, &resp.Degraded, name, err)
+		if !ok {
+			failures++
 		}
+		return ok
 	}
-
-	// Get backlog by subscription (top 10)
-	bySubscription, err := h.Queries.GetBacklogBySubscription(c, 10)
-	if err == nil {
-		resp.BySubscription = make([]BacklogBySubscriptionResponse, len(bySubscription))
-		for i, bs := range bySubscription {
-			resp.BySubscription[i] = BacklogBySubscriptionResponse{
-				SubscriptionID:  bs.SubscriptionID,
-				SubscriptionURL: bs.SubscriptionUrl,
-				PendingCount:    bs.PendingCount,
-				RetryingCount:   nullFloatToInt64(bs.RetryingCount),
-				MaxRetries:      interfaceToInt64(bs.MaxRetries),
-				OldestTask:      interfaceToTime(bs.OldestTask),
-			}
-		}
+	if s, err := h.Queries.APIBacklogStats(ctx); track("backlog_stats", err) {
+		st := toBacklogStats(s)
+		resp.Stats = &st
 	}
-
-	// Get retry distribution
-	retryDist, err := h.Queries.GetRetryDistribution(c)
-	if err == nil {
-		resp.RetryDistribution = make([]RetryDistributionResponse, len(retryDist))
-		for i, rd := range retryDist {
-			resp.RetryDistribution[i] = RetryDistributionResponse{
-				RetryCount: rd.RetryCount,
-				TaskCount:  rd.TaskCount,
-			}
-		}
+	if rows, err := h.Queries.APIBacklogBySubscription(ctx, 10); track("backlog_by_subscription", err) {
+		resp.BySubscription = toBySubscription(rows)
 	}
-
-	c.JSON(http.StatusOK, resp)
+	if rows, err := h.Queries.APIRetryDistribution(ctx); track("retry_distribution", err) {
+		resp.RetryDistribution = toRetryDistribution(rows)
+	}
+	if failures == 3 {
+		RespondInternalError(c)
+		return
+	}
+	RespondSuccess(c, http.StatusOK, resp)
 }
 
-// GetBacklogStats returns backlog statistics.
+// GetBacklogStats handles GET /api/backlog/stats.
 func (h *BacklogHandler) GetBacklogStats(c *gin.Context) {
-	stats, err := h.Queries.GetBacklogStats(c)
+	s, err := h.Queries.APIBacklogStats(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get backlog stats"})
+		respondInternal(c, "backlog stats", err)
 		return
 	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"timestamp": time.Now().Format(time.RFC3339),
-		"stats": BacklogStatsResponse{
-			TotalPending:    stats.TotalPending,
-			NewTasks:        nullFloatToInt64(stats.NewTasks),
-			RetryingTasks:   nullFloatToInt64(stats.RetryingTasks),
-			ClaimedTasks:    nullFloatToInt64(stats.ClaimedTasks),
-			WaitingForRetry: nullFloatToInt64(stats.WaitingForRetry),
-			MaxRetryCount:   interfaceToInt64(stats.MaxRetryCount),
-			AvgRetryCount:   stats.AvgRetryCount.Float64,
-		},
-	})
+	RespondSuccess(c, http.StatusOK, gin.H{"timestamp": ts(time.Now()), "stats": toBacklogStats(s)})
 }
 
-// ListBacklogTasks returns tasks in the backlog.
+// backlogTaskRow is the column set shared by the backlog task list queries.
+type backlogTaskRow = database.APIListActiveTasksRow
+
+func toBacklogTask(r backlogTaskRow) BacklogTaskResponse {
+	t := BacklogTaskResponse{
+		ID: r.ID, SubscriptionID: r.SubscriptionID, SubscriptionURL: r.SubscriptionUrl,
+		Status: r.Status, EventType: nullStr(r.EventType), AttemptCount: r.AttemptCount,
+		CreatedAt: r.CreatedAt, LastAttemptAt: nullTimePtr(r.LastAttemptAt),
+		NextAttemptAt: nullTimePtr(r.NextAttemptAt), LeaseUntil: nullTimePtr(r.LeaseUntil),
+	}
+	t.ClaimedBy = nullStr(r.ClaimedBy)
+	return t
+}
+
+func (h *BacklogHandler) listTasks(c *gin.Context, msg string, load func(lim int64) ([]backlogTaskRow, error)) {
+	limit, ok := queryInt(c, "limit", 50, 1, maxPageLimit)
+	if !ok {
+		return
+	}
+	rows, err := load(limit)
+	if err != nil {
+		respondInternal(c, msg, err)
+		return
+	}
+	tasks := make([]BacklogTaskResponse, len(rows))
+	for i, r := range rows {
+		tasks[i] = toBacklogTask(r)
+	}
+	RespondSuccess(c, http.StatusOK, gin.H{"timestamp": ts(time.Now()), "count": len(tasks), "tasks": tasks})
+}
+
+// ListBacklogTasks handles GET /api/backlog/tasks: pending and in_flight tasks, oldest first.
 func (h *BacklogHandler) ListBacklogTasks(c *gin.Context) {
-	limit := int64(50)
-	if limitStr := c.Query("limit"); limitStr != "" {
-		if l, err := strconv.ParseInt(limitStr, 10, 64); err == nil && l > 0 && l <= 100 {
-			limit = l
-		}
-	}
-
-	tasks, err := h.Queries.ListBacklogTasks(c, limit)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list backlog tasks"})
-		return
-	}
-
-	response := make([]BacklogTaskResponse, len(tasks))
-	for i, task := range tasks {
-		response[i] = BacklogTaskResponse{
-			ID:              task.ID,
-			SubscriptionID:  task.SubscriptionID,
-			SubscriptionURL: task.SubscriptionUrl,
-			Status:          task.Status,
-			AttemptCount:    task.AttemptCount,
-			CreatedAt:       task.CreatedAt,
-		}
-		if task.LastAttemptAt.Valid {
-			t := task.LastAttemptAt.Time
-			response[i].LastAttemptAt = &t
-		}
-		if task.NextAttemptAt.Valid {
-			t := task.NextAttemptAt.Time
-			response[i].NextAttemptAt = &t
-		}
-		if task.ClaimedBy.Valid {
-			response[i].ClaimedBy = &task.ClaimedBy.String
-		}
-		if task.LeaseUntil.Valid {
-			t := task.LeaseUntil.Time
-			response[i].LeaseUntil = &t
-		}
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"timestamp": time.Now().Format(time.RFC3339),
-		"count":     len(response),
-		"tasks":     response,
+	h.listTasks(c, "list backlog tasks", func(lim int64) ([]backlogTaskRow, error) {
+		return h.Queries.APIListActiveTasks(c.Request.Context(), lim)
 	})
 }
 
-// ListRetryingTasks returns tasks that are being retried.
+// ListRetryingTasks handles GET /api/backlog/retrying: pending tasks waiting on a retry.
 func (h *BacklogHandler) ListRetryingTasks(c *gin.Context) {
-	limit := int64(50)
-	if limitStr := c.Query("limit"); limitStr != "" {
-		if l, err := strconv.ParseInt(limitStr, 10, 64); err == nil && l > 0 && l <= 100 {
-			limit = l
+	h.listTasks(c, "list retrying tasks", func(lim int64) ([]backlogTaskRow, error) {
+		rows, err := h.Queries.APIListRetryingTasks(c.Request.Context(), lim)
+		out := make([]backlogTaskRow, len(rows))
+		for i, r := range rows {
+			out[i] = backlogTaskRow(r)
 		}
-	}
-
-	tasks, err := h.Queries.ListRetryingTasks(c, limit)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list retrying tasks"})
-		return
-	}
-
-	response := make([]BacklogTaskResponse, len(tasks))
-	for i, task := range tasks {
-		response[i] = BacklogTaskResponse{
-			ID:              task.ID,
-			SubscriptionID:  task.SubscriptionID,
-			SubscriptionURL: task.SubscriptionUrl,
-			Status:          task.Status,
-			AttemptCount:    task.AttemptCount,
-			CreatedAt:       task.CreatedAt,
-		}
-		if task.LastAttemptAt.Valid {
-			t := task.LastAttemptAt.Time
-			response[i].LastAttemptAt = &t
-		}
-		if task.NextAttemptAt.Valid {
-			t := task.NextAttemptAt.Time
-			response[i].NextAttemptAt = &t
-		}
-		if task.ClaimedBy.Valid {
-			response[i].ClaimedBy = &task.ClaimedBy.String
-		}
-		if task.LeaseUntil.Valid {
-			t := task.LeaseUntil.Time
-			response[i].LeaseUntil = &t
-		}
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"timestamp": time.Now().Format(time.RFC3339),
-		"count":     len(response),
-		"tasks":     response,
+		return out, err
 	})
 }
 
-// ListActiveClaimedTasks returns tasks currently being processed by workers.
+// ListActiveClaimedTasks handles GET /api/backlog/active: in_flight tasks.
 func (h *BacklogHandler) ListActiveClaimedTasks(c *gin.Context) {
-	limit := int64(50)
-	if limitStr := c.Query("limit"); limitStr != "" {
-		if l, err := strconv.ParseInt(limitStr, 10, 64); err == nil && l > 0 && l <= 100 {
-			limit = l
+	h.listTasks(c, "list in-flight tasks", func(lim int64) ([]backlogTaskRow, error) {
+		rows, err := h.Queries.APIListInFlightTasks(c.Request.Context(), lim)
+		out := make([]backlogTaskRow, len(rows))
+		for i, r := range rows {
+			out[i] = backlogTaskRow(r)
 		}
-	}
-
-	tasks, err := h.Queries.ListActiveClaimedTasks(c, limit)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list active tasks"})
-		return
-	}
-
-	response := make([]BacklogTaskResponse, len(tasks))
-	for i, task := range tasks {
-		response[i] = BacklogTaskResponse{
-			ID:              task.ID,
-			SubscriptionID:  task.SubscriptionID,
-			SubscriptionURL: task.SubscriptionUrl,
-			Status:          task.Status,
-			AttemptCount:    task.AttemptCount,
-			CreatedAt:       task.CreatedAt,
-		}
-		if task.LastAttemptAt.Valid {
-			t := task.LastAttemptAt.Time
-			response[i].LastAttemptAt = &t
-		}
-		if task.NextAttemptAt.Valid {
-			t := task.NextAttemptAt.Time
-			response[i].NextAttemptAt = &t
-		}
-		if task.ClaimedBy.Valid {
-			response[i].ClaimedBy = &task.ClaimedBy.String
-		}
-		if task.LeaseUntil.Valid {
-			t := task.LeaseUntil.Time
-			response[i].LeaseUntil = &t
-		}
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"timestamp": time.Now().Format(time.RFC3339),
-		"count":     len(response),
-		"tasks":     response,
+		return out, err
 	})
 }
 
-// GetBacklogBySubscription returns backlog grouped by subscription.
+// GetBacklogBySubscription handles GET /api/backlog/by-subscription?limit=50.
 func (h *BacklogHandler) GetBacklogBySubscription(c *gin.Context) {
-	limit := int64(50)
-	if limitStr := c.Query("limit"); limitStr != "" {
-		if l, err := strconv.ParseInt(limitStr, 10, 64); err == nil && l > 0 && l <= 100 {
-			limit = l
-		}
-	}
-
-	bySubscription, err := h.Queries.GetBacklogBySubscription(c, limit)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get backlog by subscription"})
+	limit, ok := queryInt(c, "limit", 50, 1, maxPageLimit)
+	if !ok {
 		return
 	}
-
-	response := make([]BacklogBySubscriptionResponse, len(bySubscription))
-	for i, bs := range bySubscription {
-		response[i] = BacklogBySubscriptionResponse{
-			SubscriptionID:  bs.SubscriptionID,
-			SubscriptionURL: bs.SubscriptionUrl,
-			PendingCount:    bs.PendingCount,
-			RetryingCount:   nullFloatToInt64(bs.RetryingCount),
-			MaxRetries:      interfaceToInt64(bs.MaxRetries),
-			OldestTask:      interfaceToTime(bs.OldestTask),
-		}
+	rows, err := h.Queries.APIBacklogBySubscription(c.Request.Context(), limit)
+	if err != nil {
+		respondInternal(c, "backlog by subscription", err)
+		return
 	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"timestamp":       time.Now().Format(time.RFC3339),
-		"count":           len(response),
-		"by_subscription": response,
-	})
+	out := toBySubscription(rows)
+	RespondSuccess(c, http.StatusOK, gin.H{"timestamp": ts(time.Now()), "count": len(out), "by_subscription": out})
 }
 
-// GetRetryDistribution returns the distribution of retry counts.
+// GetRetryDistribution handles GET /api/backlog/retry-distribution.
 func (h *BacklogHandler) GetRetryDistribution(c *gin.Context) {
-	retryDist, err := h.Queries.GetRetryDistribution(c)
+	rows, err := h.Queries.APIRetryDistribution(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get retry distribution"})
+		respondInternal(c, "retry distribution", err)
 		return
 	}
-
-	response := make([]RetryDistributionResponse, len(retryDist))
-	for i, rd := range retryDist {
-		response[i] = RetryDistributionResponse{
-			RetryCount: rd.RetryCount,
-			TaskCount:  rd.TaskCount,
-		}
+	dist := toRetryDistribution(rows)
+	var total int64
+	for _, d := range dist {
+		total += d.TaskCount
 	}
-
-	// Calculate total retrying tasks
-	var totalRetrying int64
-	for _, rd := range response {
-		totalRetrying += rd.TaskCount
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"timestamp":         time.Now().Format(time.RFC3339),
-		"total_retrying":    totalRetrying,
-		"distribution":      response,
-	})
+	RespondSuccess(c, http.StatusOK, gin.H{"timestamp": ts(time.Now()), "total_retrying": total, "distribution": dist})
 }
-
-// Helper function to safely convert sql.NullFloat64 to int64
-// Note: This is already defined in metrics.go, but we need it here too
-// for standalone compilation. In production, consider moving to a common package.
-func nullFloatToInt64BacklogHelper(nf sql.NullFloat64) int64 {
-	if nf.Valid {
-		return int64(nf.Float64)
-	}
-	return 0
-}
-
-// Use the helper from metrics.go since both are in the same package
-// The nullFloatToInt64 function is already available
