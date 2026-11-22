@@ -79,6 +79,7 @@ func run(ctx context.Context, logger *slog.Logger) error {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	router, err := server.NewRouter(server.Deps{
+		DB:             db.DB,
 		Queries:        queries,
 		Cache:          subCache,
 		Logger:         logger,

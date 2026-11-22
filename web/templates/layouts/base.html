@@ -1,0 +1,40 @@
+{{define "base"}}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="htmx-config" content='{"includeIndicatorCSS": false}'>
+  <title>{{.Title}} · Webhook Delivery</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  {{- /* htmx 4.0.2: dist/htmx.min.js from https://registry.npmjs.org/htmx.org/-/htmx.org-4.0.2.tgz
+         sha256 fd25ba3fe5e44768756f23862a6daa4f928192199a121e825e882e719bc8aabd */}}
+  <script src="/static/vendor/htmx.min.js" defer></script>
+  <script src="/static/js/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+  <header class="topbar">
+    <div class="topbar__inner">
+      <a class="brand" href="/ui/dashboard"><span class="brand__mark" aria-hidden="true"></span>Webhook Delivery</a>
+      <nav class="nav" aria-label="Primary">
+        <ul class="nav__list">
+          {{template "nav_item" dict "Href" "/ui/dashboard" "Label" "Overview" "Key" "dashboard" "Current" .Nav}}
+          {{template "nav_item" dict "Href" "/ui/subscriptions" "Label" "Subscriptions" "Key" "subscriptions" "Current" .Nav}}
+          {{template "nav_item" dict "Href" "/ui/backlog" "Label" "Backlog" "Key" "backlog" "Current" .Nav}}
+          {{template "nav_item" dict "Href" "/ui/dlq" "Label" "Dead letters" "Key" "dlq" "Current" .Nav}}
+          {{template "nav_item" dict "Href" "/ui/scheduled" "Label" "Scheduled" "Key" "scheduled" "Current" .Nav}}
+        </ul>
+      </nav>
+      {{if .Live}}{{template "live_status" .}}{{end}}
+    </div>
+  </header>
+  <div id="flash" class="flash-region" aria-live="polite">{{with .Flash}}{{template "toast" .}}{{end}}</div>
+  <main id="main" class="main" tabindex="-1">
+    {{if not .Live}}{{template "degraded" .}}{{end}}
+    {{template "content" .}}
+  </main>
+</body>
+</html>{{end}}
+
+{{define "nav_item"}}<li><a class="nav__link" href="{{.Href}}"{{if eq .Key .Current}} aria-current="page"{{end}}>{{.Label}}</a></li>{{end}}

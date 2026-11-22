@@ -1,0 +1,64 @@
+{{/* Shared page chrome: toasts, banners, live status, pagination, subscription header. */}}
+
+{{define "toast"}}<div class="toast toast--{{.Kind}}" role="{{if eq .Kind "error"}}alert{{else}}status{{end}}">
+  <p class="toast__msg">{{.Msg}}</p>
+  <button type="button" class="toast__close" data-dismiss aria-label="Dismiss">×</button>
+</div>{{end}}
+
+{{/* Out-of-band toast only: htmx skips the main swap, so the current content stays put. */}}
+{{define "toast_oob"}}<div hx-swap-oob="beforeend:#flash">{{template "toast" .}}</div>{{end}}
+
+{{define "degraded"}}{{if .Degraded}}<div class="banner banner--warn" role="status">
+  <p><strong>Some figures could not be loaded</strong> ({{range $i, $d := .Degraded}}{{if $i}}, {{end}}{{$d}}{{end}}). The rest of the page is current; it retries on the next refresh.</p>
+</div>{{end}}{{end}}
+
+{{define "live_status"}}<div class="live" data-live>
+  <span class="live__dot" aria-hidden="true"></span>
+  <span class="live__label"><span data-live-state>Live</span>, updated {{template "last_updated" .}}</span>
+  <button type="button" class="btn btn--ghost btn--sm live__toggle" data-live-toggle aria-pressed="false">Pause</button>
+</div>{{end}}
+
+{{define "last_updated"}}<time id="last-updated" datetime="{{.Now.Format "2006-01-02T15:04:05Z07:00"}}" data-time="relative">{{.Now.Format "15:04:05 UTC"}}</time>{{end}}
+
+{{/* Sent with every poll response so the stamp moves even when the data does not. */}}
+{{define "last_updated_oob"}}<time id="last-updated" hx-swap-oob="true" datetime="{{.Now.Format "2006-01-02T15:04:05Z07:00"}}" data-time="relative">{{.Now.Format "15:04:05 UTC"}}</time>{{end}}
+
+{{define "pager"}}{{if or .HasPrev .HasNext}}<nav class="pager" aria-label="Pagination">
+  {{if .HasPrev}}<a class="btn btn--sm" href="{{.PrevURL}}" rel="prev">Previous</a>{{else}}<span class="btn btn--sm" aria-disabled="true">Previous</span>{{end}}
+  <span class="pager__page">Page {{.Page}}</span>
+  {{if .HasNext}}<a class="btn btn--sm" href="{{.NextURL}}" rel="next">Next</a>{{else}}<span class="btn btn--sm" aria-disabled="true">Next</span>{{end}}
+</nav>{{end}}{{end}}
+
+{{define "sub_header"}}<header class="page-head page-head--sub">
+  <p class="crumbs"><a href="/ui/subscriptions">Subscriptions</a></p>
+  <div class="page-head__row">
+    <div class="page-head__title">
+      <h1 class="url-title">{{.Sub.TargetUrl}}</h1>
+      <p class="meta">
+        {{if .Sub.Paused}}{{badge "subscription" "paused"}}{{else}}{{badge "subscription" "active"}}{{end}}
+        <span class="mono" title="Subscription ID">{{.Sub.ID}}</span>
+        {{if .Sub.EventTypes.String}}<span>Events: <span class="mono">{{.Sub.EventTypes.String}}</span></span>{{else}}<span>All events</span>{{end}}
+      </p>
+    </div>
+    <form method="post" action="/ui/subscriptions/{{.Sub.ID}}/{{if .Sub.Paused}}resume{{else}}pause{{end}}" class="page-head__actions">
+      <input type="hidden" name="return" value="{{if eq .Tab "settings"}}edit{{else}}{{.Tab}}{{end}}">
+      {{if .Sub.Paused}}<button class="btn" type="submit">Resume deliveries</button>{{else}}<button class="btn" type="submit">Pause deliveries</button>{{end}}
+    </form>
+  </div>
+  {{if .Sub.Paused}}<p class="banner banner--warn">Deliveries are paused. Events are still accepted and queue up until you resume.</p>{{end}}
+  <nav class="tabs" aria-label="Subscription">
+    <a class="tabs__link" href="/ui/subscriptions/{{.Sub.ID}}/logs"{{if eq .Tab "logs"}} aria-current="page"{{end}}>Activity</a>
+    <a class="tabs__link" href="/ui/subscriptions/{{.Sub.ID}}/analytics"{{if eq .Tab "analytics"}} aria-current="page"{{end}}>Analytics</a>
+    <a class="tabs__link" href="/ui/subscriptions/{{.Sub.ID}}/scheduled"{{if eq .Tab "scheduled"}} aria-current="page"{{end}}>Scheduled</a>
+    <a class="tabs__link" href="/ui/dlq?subscription={{.Sub.ID}}">Dead letters</a>
+    <a class="tabs__link" href="/ui/subscriptions/{{.Sub.ID}}/test"{{if eq .Tab "test"}} aria-current="page"{{end}}>Send test</a>
+    <a class="tabs__link" href="/ui/subscriptions/{{.Sub.ID}}/edit"{{if eq .Tab "settings"}} aria-current="page"{{end}}>Settings</a>
+  </nav>
+</header>{{end}}
+
+{{define "field_error"}}{{with .}}<p class="field__error" id="{{.ID}}-error">{{.Msg}}</p>{{end}}{{end}}
+
+{{define "form_summary"}}{{if .}}<div class="banner banner--bad" role="alert" id="form-errors" tabindex="-1">
+  <p><strong>Fix {{len .}} {{if eq (len .) 1}}problem{{else}}problems{{end}} before saving:</strong></p>
+  <ul class="banner__list">{{range $field, $msg := .}}<li><a href="#{{$field}}">{{$msg}}</a></li>{{end}}</ul>
+</div>{{else}}<div id="form-errors"></div>{{end}}{{end}}
