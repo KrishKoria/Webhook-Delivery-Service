@@ -1,0 +1,115 @@
+{{/* Activity table, dead letter rows and scheduled rows. */}}
+
+{{define "logs_table"}}{{with .Data}}<div id="logs"{{if not .Older}} hx-get="{{.PollURL}}" hx-trigger="every 3s" hx-swap="outerHTML" data-poll{{end}}>
+  {{if .Rows}}
+  <div class="table-wrap"><table class="table">
+    <caption class="sr-only">Delivery attempts, newest first</caption>
+    <thead><tr>
+      <th scope="col">Time</th><th scope="col">Event</th><th scope="col" class="num">Attempt</th>
+      <th scope="col">Outcome</th><th scope="col">HTTP</th><th scope="col">Task</th><th scope="col">Details</th>
+      <th scope="col"><span class="sr-only">Actions</span></th>
+    </tr></thead>
+    <tbody>{{range .Rows}}<tr>
+      <td class="nowrap">{{timeTag .Timestamp}}</td>
+      <td>{{if .EventType.String}}<span class="mono">{{.EventType.String}}</span>{{else}}<span class="muted">none</span>{{end}}</td>
+      <td class="num">{{.AttemptNumber}}</td>
+      <td>{{badge "outcome" .Outcome}}</td>
+      <td><span class="{{httpClass .HttpStatus}}">{{if .HttpStatus.Valid}}{{.HttpStatus.Int64}}{{else}}none{{end}}</span></td>
+      <td class="nowrap"><span class="mono" title="{{.DeliveryTaskID}}">{{short .DeliveryTaskID}}</span> {{badge "task" .TaskStatus}}</td>
+      <td>{{with .ErrorDetails.String}}<details class="detail"><summary><span class="truncate">{{.}}</span></summary><pre class="code-block">{{.}}</pre></details>{{else}}<span class="muted">none</span>{{end}}</td>
+      <td class="actions">{{if canRedeliver .TaskStatus}}<form class="inline-form" method="post" action="/ui/tasks/{{.DeliveryTaskID}}/redeliver"
+            hx-post="/ui/tasks/{{.DeliveryTaskID}}/redeliver" hx-swap="none">
+          <button class="btn btn--sm btn--ghost" type="submit" title="Queue this payload again as a new task">Redeliver</button>
+        </form>{{end}}</td>
+    </tr>{{end}}</tbody>
+  </table></div>
+  {{else if .IsFiltered}}
+  <div class="empty"><strong>No attempts match these filters.</strong><a href="/ui/subscriptions/{{.Sub.ID}}/logs">Clear filters</a></div>
+  {{else if .Older}}
+  <div class="empty"><strong>No older attempts.</strong><a href="{{.LatestURL}}">Back to the latest</a></div>
+  {{else}}
+  <div class="empty"><strong>No delivery attempts yet.</strong><span>Each attempt to reach the target shows up here within seconds.</span><a href="/ui/subscriptions/{{.Sub.ID}}/test">Send a test event</a></div>
+  {{end}}
+  {{if or .OlderURL .Older}}<nav class="pager" aria-label="Pagination">
+    {{if .Older}}<a class="btn btn--sm" href="{{.LatestURL}}">Latest</a>{{end}}
+    {{if .OlderURL}}<a class="btn btn--sm" href="{{.OlderURL}}" rel="next">Older</a>{{end}}
+  </nav>{{end}}
+{{end}}{{if .Fragment}}{{template "last_updated_oob" .}}{{end}}
+</div>{{end}}
+
+{{define "dlq_row"}}<tr id="dlq-{{.Entry.ID}}">
+  <td class="check"><input type="checkbox" name="ids" value="{{.Entry.ID}}" data-select-item aria-label="Select entry {{short .Entry.ID}}"></td>
+  <td class="nowrap">{{timeTag .Entry.FailedAt}}</td>
+  <td class="cell-url"><a href="/ui/dlq/{{.Entry.ID}}">{{if .Entry.TargetUrl.String}}{{.Entry.TargetUrl.String}}{{else}}{{.Entry.SubscriptionID}}{{end}}</a><span class="cell-sub">{{short .Entry.ID}}{{with .Entry.EventType.String}} · {{.}}{{end}}</span></td>
+  <td class="num">{{.Entry.AttemptCount}}</td>
+  <td><span class="truncate" title="{{.Entry.Reason}}">{{.Entry.Reason}}</span></td>
+  <td>{{badge "dlq" .Entry.Status}}</td>
+  <td class="actions">
+    {{if eq .Entry.Status "dead"}}<button class="btn btn--sm" type="submit" formaction="/ui/dlq/{{.Entry.ID}}/retry"
+        hx-post="/ui/dlq/{{.Entry.ID}}/retry" hx-target="closest tr" hx-swap="outerHTML">Retry</button>{{end}}
+    <button class="btn btn--sm btn--ghost" type="submit" formaction="/ui/dlq/{{.Entry.ID}}/delete"
+        hx-post="/ui/dlq/{{.Entry.ID}}/delete" hx-target="closest tr" hx-swap="delete"
+        hx-confirm="Delete this dead letter entry? The payload is gone for good.">Delete</button>
+  </td>
+</tr>{{end}}
+
+{{define "dlq_row_result"}}{{template "dlq_row" .Row}}{{template "toast_oob" .Toast}}{{end}}
+
+{{define "sched_row"}}<tr id="sched-{{.Row.ID}}">
+  <td class="nowrap">{{timeTag .Row.ScheduledFor}}</td>
+  <td>{{with .Row.Recurrence.String}}{{if eq . "none"}}once{{else}}{{.}}{{end}}{{else}}once{{end}}</td>
+  <td>{{badge "scheduled" .Row.Status}}</td>
+  {{if .Global}}<td><a class="mono" href="/ui/subscriptions/{{.Row.SubscriptionID}}/scheduled">{{short .Row.SubscriptionID}}</a></td>{{end}}
+  <td><code class="truncate" title="{{.Row.Payload}}">{{.Row.Payload}}</code></td>
+  <td class="actions">
+    {{if eq .Row.Status "pending"}}<form class="inline-form" method="post" action="/ui/scheduled/{{.Row.ID}}/cancel"
+          hx-post="/ui/scheduled/{{.Row.ID}}/cancel" hx-target="closest tr" hx-swap="outerHTML">
+      <input type="hidden" name="return" value="{{.Return}}">{{if .Global}}<input type="hidden" name="global" value="1">{{end}}
+      <button class="btn btn--sm" type="submit">Cancel</button>
+    </form>{{end}}
+    <form class="inline-form" method="post" action="/ui/scheduled/{{.Row.ID}}/delete"
+          hx-post="/ui/scheduled/{{.Row.ID}}/delete" hx-target="closest tr" hx-swap="delete"
+          hx-confirm="Delete this scheduled webhook?">
+      <input type="hidden" name="return" value="{{.Return}}">
+      <button class="btn btn--sm btn--ghost" type="submit">Delete</button>
+    </form>
+  </td>
+</tr>{{end}}
+
+{{define "sched_row_result"}}{{template "sched_row" .Row}}{{template "toast_oob" .Toast}}{{end}}
+
+{{define "schedule_form_body"}}{{with .Data}}<form id="sched-form" class="form form--wide" method="post" action="/ui/subscriptions/{{.Sub.ID}}/scheduled"
+      hx-post="/ui/subscriptions/{{.Sub.ID}}/scheduled" hx-swap="outerHTML" novalidate data-schedule-form>
+  {{template "form_summary" .Errors}}
+
+  <div class="form__row">
+    <div class="field">
+      <label class="field__label" for="scheduled_for_local">Fire at</label>
+      <input class="input" type="datetime-local" id="scheduled_for_local" name="scheduled_for_local" value="{{.Local}}" min="{{.MinLocal}}" required
+             aria-describedby="scheduled_for_local-hint{{if index .Errors "scheduled_for_local"}} scheduled_for_local-error{{end}}"{{if index .Errors "scheduled_for_local"}} aria-invalid="true"{{end}}>
+      <input type="hidden" name="tz_offset" value="{{.TZOffset}}" data-tz-offset>
+      <p class="field__hint" id="scheduled_for_local-hint" data-tz-hint>Read as UTC.</p>
+      {{with index .Errors "scheduled_for_local"}}<p class="field__error" id="scheduled_for_local-error">{{.}}</p>{{end}}
+    </div>
+    <div class="field">
+      <label class="field__label" for="recurrence">Repeat</label>
+      <select class="select" id="recurrence" name="recurrence"{{if index .Errors "recurrence"}} aria-invalid="true" aria-describedby="recurrence-error"{{end}}>
+        {{range .Recurrences}}<option value="{{.}}"{{if eq . $.Data.Recurrence}} selected{{end}}>{{if eq . "none"}}Does not repeat{{else if eq . "daily"}}Every day{{else if eq . "weekly"}}Every week{{else}}Every month (clamped to month end){{end}}</option>{{end}}
+      </select>
+      {{with index .Errors "recurrence"}}<p class="field__error" id="recurrence-error">{{.}}</p>{{end}}
+    </div>
+  </div>
+
+  <div class="field">
+    <label class="field__label" for="payload">Payload</label>
+    <textarea class="textarea" id="payload" name="payload" rows="10" spellcheck="false"
+              aria-describedby="payload-hint{{if index .Errors "payload"}} payload-error{{end}}"{{if index .Errors "payload"}} aria-invalid="true"{{end}}>{{.Payload}}</textarea>
+    <p class="field__hint" id="payload-hint">When the time comes, this becomes a normal delivery task. Missed repeats are skipped, not sent in a burst.</p>
+    {{with index .Errors "payload"}}<p class="field__error" id="payload-error">{{.}}</p>{{end}}
+  </div>
+
+  <div class="form__actions">
+    <button class="btn btn--primary" type="submit">Schedule webhook</button>
+    <a class="btn btn--ghost" href="/ui/subscriptions/{{.Sub.ID}}/scheduled">Cancel</a>
+  </div>
+</form>{{end}}{{end}}

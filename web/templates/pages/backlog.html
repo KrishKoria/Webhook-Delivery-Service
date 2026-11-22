@@ -1,0 +1,7 @@
+{{define "content"}}
+<header class="page-head">
+  <h1>Backlog</h1>
+  <p class="lede">Tasks that are waiting, in flight or backing off between retries. Retries wait 10s, 30s, 1m, 5m, then 15m before a task moves to the dead letter queue.</p>
+</header>
+{{template "backlog_body" .}}
+{{end}}

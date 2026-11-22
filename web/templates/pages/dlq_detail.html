@@ -1,0 +1,28 @@
+{{define "content"}}
+{{with .Data.Entry}}
+<header class="page-head">
+  <p class="crumbs"><a href="/ui/dlq">Dead letter queue</a></p>
+  <div class="page-head__row">
+    <div class="page-head__title">
+      <h1 class="url-title">{{if .TargetUrl.String}}{{.TargetUrl.String}}{{else}}Entry {{short .ID}}{{end}}</h1>
+      <p class="meta">{{badge "dlq" .Status}}<span class="mono">{{.ID}}</span></p>
+    </div>
+    <div class="page-head__actions">
+      {{if eq .Status "dead"}}<form method="post" action="/ui/dlq/{{.ID}}/retry"><input type="hidden" name="return" value="/ui/dlq/{{.ID}}"><button class="btn btn--primary" type="submit">Retry delivery</button></form>{{end}}
+      <form method="post" action="/ui/dlq/{{.ID}}/delete" data-confirm="Delete this dead letter entry? The payload is gone for good."><input type="hidden" name="return" value="/ui/dlq"><button class="btn btn--danger" type="submit">Delete</button></form>
+    </div>
+  </div>
+</header>
+<dl class="kv">
+  <dt>Reason</dt><dd>{{.Reason}}</dd>
+  <dt>Subscription</dt><dd><a class="mono" href="/ui/subscriptions/{{.SubscriptionID}}/logs">{{.SubscriptionID}}</a></dd>
+  <dt>Event type</dt><dd>{{if .EventType.String}}<span class="mono">{{.EventType.String}}</span>{{else}}<span class="muted">none</span>{{end}}</dd>
+  <dt>Attempts</dt><dd>{{.AttemptCount}}</dd>
+  <dt>Failed</dt><dd>{{timeTag .FailedAt}}</dd>
+  <dt>Last attempt</dt><dd>{{timeTag .LastAttemptAt}}</dd>
+  <dt>Original task</dt><dd class="mono">{{.OriginalTaskID}}</dd>
+</dl>
+{{with .ErrorDetails.String}}<section class="section" aria-labelledby="d-err"><h2 id="d-err">Last error</h2><pre class="code-block">{{.}}</pre></section>{{end}}
+<section class="section" aria-labelledby="d-payload"><h2 id="d-payload">Payload</h2><pre class="code-block">{{prettyJSON .Payload}}</pre></section>
+{{end}}
+{{end}}

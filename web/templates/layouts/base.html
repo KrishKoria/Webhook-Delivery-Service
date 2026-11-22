@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <meta name="htmx-config" content='{"includeIndicatorCSS": false}'>
+  <meta name="htmx-config" content='{"includeIndicatorCSS": false, "noSwap": [204, 304, 400, 401, 403, 413, 415, 429, "5xx"]}'>
   <title>{{.Title}} · Webhook Delivery</title>
   <link rel="stylesheet" href="/static/styles.css">
   {{- /* htmx 4.0.2: dist/htmx.min.js from https://registry.npmjs.org/htmx.org/-/htmx.org-4.0.2.tgz
@@ -16,7 +16,7 @@
   <a class="skip-link" href="#main">Skip to main content</a>
   <header class="topbar">
     <div class="topbar__inner">
-      <a class="brand" href="/ui/dashboard"><span class="brand__mark" aria-hidden="true"></span>Webhook Delivery</a>
+      <a class="brand" href="/ui/dashboard"><span class="brand__mark" aria-hidden="true"></span><span class="brand__text">Webhook Delivery</span></a>
       <nav class="nav" aria-label="Primary">
         <ul class="nav__list">
           {{template "nav_item" dict "Href" "/ui/dashboard" "Label" "Overview" "Key" "dashboard" "Current" .Nav}}
