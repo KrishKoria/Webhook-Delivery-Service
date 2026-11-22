@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -162,26 +163,35 @@ func TestRateLimitMiddleware_Returns429(t *testing.T) {
 	}
 }
 
-func TestRateLimiter_CapEvictsLeastRecentlyUsed(t *testing.T) {
-	limiter := NewRateLimiter(RateLimitConfig{RequestsPerSecond: 1, BurstSize: 1, Enabled: true, MaxBuckets: 3})
-	limiter.Allow("a")
-	time.Sleep(2 * time.Millisecond)
-	limiter.Allow("b")
-	time.Sleep(2 * time.Millisecond)
-	limiter.Allow("c")
-	time.Sleep(2 * time.Millisecond)
-	limiter.Allow("d") // evicts "a", the least recently used
+func TestRateLimiter_CapEvictsFullestBucket(t *testing.T) {
+	limiter := NewRateLimiter(RateLimitConfig{RequestsPerSecond: 0.001, BurstSize: 5, Enabled: true, MaxBuckets: 3})
+	limiter.Allow("a") // 4 tokens left
+	for range 5 {
+		limiter.Allow("drained") // 0 tokens left
+	}
+	limiter.Allow("b") // 4 tokens left
+	limiter.Allow("c") // cap hit: evicts "a" (4 tokens, oldest of the fullest)
 
 	if n := limiter.Len(); n != 3 {
 		t.Fatalf("bucket count = %d, want 3", n)
 	}
-	// "b" still exists with an empty bucket, so it is limited.
-	if limiter.Allow("b") {
-		t.Error("expected b to still be rate limited")
+	if limiter.Allow("drained") {
+		t.Error("the drained bucket was evicted; its limit was reset")
 	}
-	// "a" was evicted, so it starts with a fresh bucket.
-	if !limiter.Allow("a") {
-		t.Error("expected evicted key a to get a fresh bucket")
+}
+
+// Flooding the limiter with random keys must not reset a limited key's bucket
+// (code review finding: unvalidated :subscription_id keys evicted real ones).
+func TestRateLimiter_RandomKeyFloodKeepsLimitedBucket(t *testing.T) {
+	limiter := NewRateLimiter(RateLimitConfig{RequestsPerSecond: 0.001, BurstSize: 3, Enabled: true, MaxBuckets: 10})
+	for range 3 {
+		limiter.Allow("victim")
+	}
+	for i := range 1000 {
+		limiter.Allow(fmt.Sprintf("random-%d", i))
+	}
+	if limiter.Allow("victim") {
+		t.Fatal("random-key flood evicted the victim's drained bucket")
 	}
 }
 

@@ -143,7 +143,7 @@ func (rl *RateLimiter) allow(key string) (bool, time.Duration) {
 	b, ok := rl.buckets[key]
 	if !ok {
 		if len(rl.buckets) >= rl.config.MaxBuckets {
-			rl.evictLRULocked()
+			rl.evictFullestLocked(now)
 		}
 		b = NewTokenBucket(float64(rl.config.BurstSize), rl.config.RequestsPerSecond)
 		rl.buckets[key] = b
@@ -151,17 +151,22 @@ func (rl *RateLimiter) allow(key string) (bool, time.Duration) {
 	return b.take(now)
 }
 
-// evictLRULocked drops the least recently used bucket. O(n), but only runs when
-// the cap is hit, and n is bounded by MaxBuckets.
-func (rl *RateLimiter) evictLRULocked() {
-	var oldestKey string
-	var oldest time.Time
+// evictFullestLocked drops the bucket holding the most tokens (after refill),
+// oldest first on ties. A re-created bucket starts full, so evicting the fullest
+// one forgives the least rate-limit debt: flooding the limiter with random keys
+// evicts the attacker's own near-full buckets, never a drained bucket that is
+// actively limiting someone. O(n), only at the cap; n <= MaxBuckets.
+func (rl *RateLimiter) evictFullestLocked(now time.Time) {
+	var victim string
+	var bestTokens float64
+	var bestUsed time.Time
 	for k, b := range rl.buckets {
-		if oldestKey == "" || b.lastUsed.Before(oldest) {
-			oldestKey, oldest = k, b.lastUsed
+		t := min(b.maxTokens, b.tokens+now.Sub(b.lastRefill).Seconds()*b.refillRate)
+		if victim == "" || t > bestTokens || (t == bestTokens && b.lastUsed.Before(bestUsed)) {
+			victim, bestTokens, bestUsed = k, t, b.lastUsed
 		}
 	}
-	delete(rl.buckets, oldestKey)
+	delete(rl.buckets, victim)
 }
 
 // Len returns the number of tracked buckets.
