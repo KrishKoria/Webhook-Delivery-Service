@@ -1,77 +1,92 @@
 package api
 
 import (
+	"context"
 	"database/sql"
+	"log/slog"
 	"net/http"
 	"time"
 
+	"github.com/KrishKoria/Webhook-Delivery-Service/internal/api/middleware"
 	"github.com/KrishKoria/Webhook-Delivery-Service/internal/database"
 	"github.com/gin-gonic/gin"
 )
 
-// MetricsHandler handles metrics endpoints.
+// MetricsHandler serves the /api/metrics endpoints.
 type MetricsHandler struct {
 	Queries *database.Queries
 }
 
-// QueueMetrics represents queue status metrics.
+// QueueMetrics counts delivery tasks by status. Active = Pending + InFlight.
 type QueueMetrics struct {
 	Pending   int64 `json:"pending"`
+	InFlight  int64 `json:"in_flight"`
+	Active    int64 `json:"active"`
 	Delivered int64 `json:"delivered"`
 	Failed    int64 `json:"failed"`
 	Total     int64 `json:"total"`
 }
 
-// OutcomeMetrics represents delivery outcome metrics.
+func toQueueMetrics(q database.APITaskCountsRow) QueueMetrics {
+	return QueueMetrics{
+		Pending: q.Pending, InFlight: q.InFlight, Active: q.Pending + q.InFlight,
+		Delivered: q.Delivered, Failed: q.Failed,
+		Total: q.Pending + q.InFlight + q.Delivered + q.Failed,
+	}
+}
+
+// OutcomeMetrics counts delivery attempts by outcome.
 type OutcomeMetrics struct {
-	Success    int64   `json:"success"`
-	Failure    int64   `json:"failure"`
-	Total      int64   `json:"total"`
+	Success     int64   `json:"success"`
+	Failure     int64   `json:"failure"`
+	Total       int64   `json:"total"`
 	SuccessRate float64 `json:"success_rate"`
 }
 
-// LatencyMetrics represents delivery latency metrics.
+func toOutcomeMetrics(s database.APIOutcomeStatsRow) OutcomeMetrics {
+	return OutcomeMetrics{
+		Success: s.Successful, Failure: s.FailedAttempts, Total: s.Total,
+		SuccessRate: successRate(s.Successful, s.Total),
+	}
+}
+
+// LatencyMetrics is the mean time from task creation to successful delivery.
 type LatencyMetrics struct {
-	AverageMs float64 `json:"average_ms"`
+	AverageMs  float64 `json:"average_ms"`
 	SampleSize int64   `json:"sample_size"`
 }
 
-// MetricsResponse represents the full metrics response.
-type MetricsResponse struct {
-	Timestamp     string         `json:"timestamp"`
-	Queue         QueueMetrics   `json:"queue"`
-	Outcomes      OutcomeMetrics `json:"outcomes"`
-	Latency       *LatencyMetrics `json:"latency,omitempty"`
-	DLQ           *DLQMetrics    `json:"dlq,omitempty"`
-	Scheduled     *ScheduledMetrics `json:"scheduled,omitempty"`
-}
-
-// DLQMetrics represents dead letter queue metrics.
+// DLQMetrics counts dead-letter entries by status.
 type DLQMetrics struct {
 	Dead    int64 `json:"dead"`
 	Retried int64 `json:"retried"`
 	Total   int64 `json:"total"`
 }
 
-// ScheduledMetrics represents scheduled webhooks metrics.
+// ScheduledMetrics counts scheduled webhooks by status.
 type ScheduledMetrics struct {
-	Pending   int64 `json:"pending"`
-	Delivered int64 `json:"delivered"`
+	Pending  int64 `json:"pending"`
+	Enqueued int64 `json:"enqueued"`
+	// Deprecated: legacy name for Enqueued, kept for the dashboard page; not serialized.
+	Delivered int64 `json:"-"`
 	Failed    int64 `json:"failed"`
 	Cancelled int64 `json:"cancelled"`
 	Total     int64 `json:"total"`
 }
 
-// RegisterMetricsRoutes registers metrics endpoints on a gin.Engine.
-func RegisterMetricsRoutes(r *gin.Engine, h *MetricsHandler) {
-	r.GET("/api/metrics", h.GetMetrics)
-	r.GET("/api/metrics/queue", h.GetQueueMetrics)
-	r.GET("/api/metrics/outcomes", h.GetOutcomeMetrics)
-	r.GET("/api/metrics/dlq", h.GetDLQMetrics)
-	r.GET("/api/metrics/scheduled", h.GetScheduledMetrics)
+// MetricsResponse is the payload of GET /api/metrics. Degraded is true when
+// one or more sections failed to load and were left out.
+type MetricsResponse struct {
+	Timestamp string            `json:"timestamp"`
+	Degraded  bool              `json:"degraded"`
+	Queue     *QueueMetrics     `json:"queue"`
+	Outcomes  *OutcomeMetrics   `json:"outcomes"`
+	Latency   *LatencyMetrics   `json:"latency"`
+	DLQ       *DLQMetrics       `json:"dlq"`
+	Scheduled *ScheduledMetrics `json:"scheduled"`
 }
 
-// RegisterMetricsRoutesGroup registers metrics endpoints on a RouterGroup.
+// RegisterMetricsRoutesGroup registers the metrics endpoints.
 func RegisterMetricsRoutesGroup(rg *gin.RouterGroup, h *MetricsHandler) {
 	rg.GET("/api/metrics", h.GetMetrics)
 	rg.GET("/api/metrics/queue", h.GetQueueMetrics)
@@ -80,7 +95,8 @@ func RegisterMetricsRoutesGroup(rg *gin.RouterGroup, h *MetricsHandler) {
 	rg.GET("/api/metrics/scheduled", h.GetScheduledMetrics)
 }
 
-// Helper functions to safely convert sql.NullFloat64 to int64
+// nullFloatToInt64 converts a nullable SQL aggregate to int64 (0 when NULL).
+// Used by the dashboard page handlers.
 func nullFloatToInt64(nf sql.NullFloat64) int64 {
 	if nf.Valid {
 		return int64(nf.Float64)
@@ -88,166 +104,110 @@ func nullFloatToInt64(nf sql.NullFloat64) int64 {
 	return 0
 }
 
-// GetMetrics returns comprehensive metrics.
+// section runs one metrics query; on failure it logs, marks the response
+// degraded and returns false so the section is left null.
+func section(c *gin.Context, degraded *bool, name string, err error) bool {
+	if err == nil {
+		return true
+	}
+	slog.ErrorContext(c.Request.Context(), "metrics section failed",
+		"section", name, "request_id", middleware.GetRequestID(c), "err", err)
+	*degraded = true
+	return false
+}
+
+// GetMetrics handles GET /api/metrics: every section over the last 24 hours.
+// A failing section is null and sets degraded:true; if all fail it returns 500.
 func (h *MetricsHandler) GetMetrics(c *gin.Context) {
-	resp := MetricsResponse{
-		Timestamp: time.Now().Format(time.RFC3339),
+	ctx := c.Request.Context()
+	resp := MetricsResponse{Timestamp: ts(time.Now())}
+	failures := 0
+	track := func(name string, err error) bool {
+		ok := section(c, &resp.Degraded, name, err)
+		if !ok {
+			failures++
+		}
+		return ok
 	}
 
-	// Queue metrics
-	queueDepth, err := h.Queries.GetTaskQueueDepth(c)
-	if err == nil {
-		pending := nullFloatToInt64(queueDepth.Pending)
-		delivered := nullFloatToInt64(queueDepth.Delivered)
-		failed := nullFloatToInt64(queueDepth.Failed)
-		resp.Queue = QueueMetrics{
-			Pending:   pending,
-			Delivered: delivered,
-			Failed:    failed,
-			Total:     pending + delivered + failed,
-		}
+	if q, err := h.Queries.APITaskCounts(ctx); track("queue", err) {
+		m := toQueueMetrics(q)
+		resp.Queue = &m
+	}
+	if s, err := h.Queries.APIOutcomeStats(ctx, database.APIOutcomeStatsParams{Hours: 24}); track("outcomes", err) {
+		m := toOutcomeMetrics(s)
+		resp.Outcomes = &m
+	}
+	if l, err := h.Queries.APIDeliveryLatency(ctx, 24); track("latency", err) {
+		resp.Latency = &LatencyMetrics{AverageMs: l.AvgSeconds * 1000, SampleSize: l.Samples}
+	}
+	if d, err := dlqMetrics(ctx, h.Queries); track("dlq", err) {
+		resp.DLQ = &d
+	}
+	if s, err := scheduledMetrics(ctx, h.Queries); track("scheduled", err) {
+		resp.Scheduled = &s
 	}
 
-	// Outcome metrics (last 24 hours)
-	stats, err := h.Queries.GetDeliveryStats(c, sql.NullString{String: "24", Valid: true})
-	if err == nil {
-		successful := nullFloatToInt64(stats.Successful)
-		failedAttempts := nullFloatToInt64(stats.FailedAttempts)
-		total := successful + failedAttempts
-		var successRate float64
-		if total > 0 {
-			successRate = float64(successful) / float64(total) * 100
-		}
-		resp.Outcomes = OutcomeMetrics{
-			Success:     successful,
-			Failure:     failedAttempts,
-			Total:       total,
-			SuccessRate: successRate,
-		}
+	if failures == 5 {
+		RespondInternalError(c)
+		return
 	}
-
-	// Latency metrics (last 24 hours)
-	latency, err := h.Queries.GetAverageDeliveryLatency(c, sql.NullString{String: "24", Valid: true})
-	if err == nil && latency.Valid {
-		// Convert seconds to milliseconds
-		resp.Latency = &LatencyMetrics{
-			AverageMs:  latency.Float64 * 1000,
-			SampleSize: 1, // We don't have sample size from this query
-		}
-	}
-
-	// DLQ metrics
-	dlqStats, err := h.Queries.GetDLQStats(c)
-	if err == nil {
-		resp.DLQ = &DLQMetrics{
-			Dead:    nullFloatToInt64(dlqStats.Dead),
-			Retried: nullFloatToInt64(dlqStats.Retried),
-			Total:   dlqStats.Total,
-		}
-	}
-
-	// Scheduled metrics
-	scheduledStats, err := h.Queries.CountScheduledWebhooksByStatus(c)
-	if err == nil {
-		resp.Scheduled = &ScheduledMetrics{
-			Pending:   nullFloatToInt64(scheduledStats.Pending),
-			Delivered: nullFloatToInt64(scheduledStats.Delivered),
-			Failed:    nullFloatToInt64(scheduledStats.Failed),
-			Cancelled: nullFloatToInt64(scheduledStats.Cancelled),
-			Total:     scheduledStats.Total,
-		}
-	}
-
-	c.JSON(http.StatusOK, resp)
+	RespondSuccess(c, http.StatusOK, resp)
 }
 
-// GetQueueMetrics returns queue-specific metrics.
+// GetQueueMetrics handles GET /api/metrics/queue.
 func (h *MetricsHandler) GetQueueMetrics(c *gin.Context) {
-	queueDepth, err := h.Queries.GetTaskQueueDepth(c)
+	q, err := h.Queries.APITaskCounts(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get queue metrics"})
+		respondInternal(c, "queue metrics", err)
 		return
 	}
-
-	pending := nullFloatToInt64(queueDepth.Pending)
-	delivered := nullFloatToInt64(queueDepth.Delivered)
-	failed := nullFloatToInt64(queueDepth.Failed)
-
-	c.JSON(http.StatusOK, gin.H{
-		"timestamp": time.Now().Format(time.RFC3339),
-		"queue": QueueMetrics{
-			Pending:   pending,
-			Delivered: delivered,
-			Failed:    failed,
-			Total:     pending + delivered + failed,
-		},
-	})
+	RespondSuccess(c, http.StatusOK, gin.H{"timestamp": ts(time.Now()), "queue": toQueueMetrics(q)})
 }
 
-// GetOutcomeMetrics returns delivery outcome metrics.
+// GetOutcomeMetrics handles GET /api/metrics/outcomes?hours=24.
 func (h *MetricsHandler) GetOutcomeMetrics(c *gin.Context) {
-	hours := c.DefaultQuery("hours", "24")
-	
-	stats, err := h.Queries.GetDeliveryStats(c, sql.NullString{String: hours, Valid: true})
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get outcome metrics"})
+	hours, ok := queryInt(c, "hours", 24, 1, maxStatsHours)
+	if !ok {
 		return
 	}
-
-	successful := nullFloatToInt64(stats.Successful)
-	failedAttempts := nullFloatToInt64(stats.FailedAttempts)
-	total := successful + failedAttempts
-	var successRate float64
-	if total > 0 {
-		successRate = float64(successful) / float64(total) * 100
+	s, err := h.Queries.APIOutcomeStats(c.Request.Context(), database.APIOutcomeStatsParams{Hours: hours})
+	if err != nil {
+		respondInternal(c, "outcome metrics", err)
+		return
 	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"timestamp": time.Now().Format(time.RFC3339),
-		"hours":     hours,
-		"outcomes": OutcomeMetrics{
-			Success:     successful,
-			Failure:     failedAttempts,
-			Total:       total,
-			SuccessRate: successRate,
-		},
-	})
+	RespondSuccess(c, http.StatusOK, gin.H{"timestamp": ts(time.Now()), "hours": hours, "outcomes": toOutcomeMetrics(s)})
 }
 
-// GetDLQMetrics returns dead letter queue metrics.
+// GetDLQMetrics handles GET /api/metrics/dlq.
 func (h *MetricsHandler) GetDLQMetrics(c *gin.Context) {
-	dlqStats, err := h.Queries.GetDLQStats(c)
+	d, err := dlqMetrics(c.Request.Context(), h.Queries)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get DLQ metrics"})
+		respondInternal(c, "dlq metrics", err)
 		return
 	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"timestamp": time.Now().Format(time.RFC3339),
-		"dlq": DLQMetrics{
-			Dead:    nullFloatToInt64(dlqStats.Dead),
-			Retried: nullFloatToInt64(dlqStats.Retried),
-			Total:   dlqStats.Total,
-		},
-	})
+	RespondSuccess(c, http.StatusOK, gin.H{"timestamp": ts(time.Now()), "dlq": d})
 }
 
-// GetScheduledMetrics returns scheduled webhooks metrics.
+// GetScheduledMetrics handles GET /api/metrics/scheduled.
 func (h *MetricsHandler) GetScheduledMetrics(c *gin.Context) {
-	scheduledStats, err := h.Queries.CountScheduledWebhooksByStatus(c)
+	s, err := scheduledMetrics(c.Request.Context(), h.Queries)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get scheduled metrics"})
+		respondInternal(c, "scheduled metrics", err)
 		return
 	}
+	RespondSuccess(c, http.StatusOK, gin.H{"timestamp": ts(time.Now()), "scheduled": s})
+}
 
-	c.JSON(http.StatusOK, gin.H{
-		"timestamp": time.Now().Format(time.RFC3339),
-		"scheduled": ScheduledMetrics{
-			Pending:   nullFloatToInt64(scheduledStats.Pending),
-			Delivered: nullFloatToInt64(scheduledStats.Delivered),
-			Failed:    nullFloatToInt64(scheduledStats.Failed),
-			Cancelled: nullFloatToInt64(scheduledStats.Cancelled),
-			Total:     scheduledStats.Total,
-		},
-	})
+func dlqMetrics(ctx context.Context, q *database.Queries) (DLQMetrics, error) {
+	d, err := q.APIDLQCounts(ctx)
+	return DLQMetrics{Dead: d.Dead, Retried: d.Retried, Total: d.Total}, err
+}
+
+func scheduledMetrics(ctx context.Context, q *database.Queries) (ScheduledMetrics, error) {
+	s, err := q.APIScheduledCounts(ctx)
+	return ScheduledMetrics{
+		Pending: s.Pending, Enqueued: s.Enqueued, Delivered: s.Enqueued,
+		Failed: s.Failed, Cancelled: s.Cancelled, Total: s.Total,
+	}, err
 }

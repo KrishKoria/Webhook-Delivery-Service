@@ -1,7 +1,9 @@
 package middleware
 
 import (
-	"log"
+	"context"
+	"log/slog"
+	"math"
 	"net/http"
 	"os"
 	"strconv"
@@ -13,169 +15,213 @@ import (
 
 // RateLimitConfig holds configuration for rate limiting.
 type RateLimitConfig struct {
-	// RequestsPerSecond is the allowed requests per second per subscription
+	// RequestsPerSecond is the sustained rate allowed per key.
 	RequestsPerSecond float64
-	// BurstSize is the maximum burst size allowed
+	// BurstSize is the maximum burst allowed per key.
 	BurstSize int
-	// Enabled controls whether rate limiting is active
+	// Enabled controls whether rate limiting is active.
 	Enabled bool
+	// IdleTTL is how long an unused bucket survives before the janitor evicts it.
+	IdleTTL time.Duration
+	// MaxBuckets caps memory; when full, the least recently used bucket is evicted.
+	MaxBuckets int
 }
 
-// DefaultRequestsPerSecond is 10 requests per second
-const DefaultRequestsPerSecond float64 = 10.0
+const (
+	// DefaultRequestsPerSecond is 10 requests per second.
+	DefaultRequestsPerSecond float64 = 10.0
+	// DefaultBurstSize allows short bursts of traffic.
+	DefaultBurstSize int = 20
+	// DefaultBucketIdleTTL evicts buckets idle for longer than this.
+	DefaultBucketIdleTTL = 10 * time.Minute
+	// DefaultMaxBuckets is the hard cap on tracked keys.
+	DefaultMaxBuckets = 10_000
+)
 
-// DefaultBurstSize allows short bursts of traffic
-const DefaultBurstSize int = 20
-
-// LoadRateLimitConfig loads rate limit configuration from environment variables.
-// ENV variables:
-//   - INGEST_RATE_LIMIT_RPS: Requests per second per subscription (default: 10)
-//   - INGEST_RATE_LIMIT_BURST: Burst size (default: 20)
-//   - INGEST_RATE_LIMIT_ENABLED: Enable/disable rate limiting (default: true)
+// LoadRateLimitConfig loads rate limit configuration from environment variables:
+//   - INGEST_RATE_LIMIT_RPS: requests per second per subscription (default 10)
+//   - INGEST_RATE_LIMIT_BURST: burst size (default 20)
+//   - INGEST_RATE_LIMIT_ENABLED: enable/disable (default true)
 func LoadRateLimitConfig() RateLimitConfig {
 	config := RateLimitConfig{
 		RequestsPerSecond: DefaultRequestsPerSecond,
 		BurstSize:         DefaultBurstSize,
 		Enabled:           true,
+		IdleTTL:           DefaultBucketIdleTTL,
+		MaxBuckets:        DefaultMaxBuckets,
 	}
-
-	// Parse RPS
-	if rpsStr := os.Getenv("INGEST_RATE_LIMIT_RPS"); rpsStr != "" {
-		if rps, err := strconv.ParseFloat(rpsStr, 64); err == nil && rps > 0 {
+	if s := os.Getenv("INGEST_RATE_LIMIT_RPS"); s != "" {
+		if rps, err := strconv.ParseFloat(s, 64); err == nil && rps > 0 {
 			config.RequestsPerSecond = rps
 		} else {
-			log.Printf("WARNING: Invalid INGEST_RATE_LIMIT_RPS value '%s', using default %.1f", rpsStr, DefaultRequestsPerSecond)
+			slog.Warn("invalid INGEST_RATE_LIMIT_RPS; using default", "value", s, "default", DefaultRequestsPerSecond)
 		}
 	}
-
-	// Parse burst size
-	if burstStr := os.Getenv("INGEST_RATE_LIMIT_BURST"); burstStr != "" {
-		if burst, err := strconv.Atoi(burstStr); err == nil && burst > 0 {
+	if s := os.Getenv("INGEST_RATE_LIMIT_BURST"); s != "" {
+		if burst, err := strconv.Atoi(s); err == nil && burst > 0 {
 			config.BurstSize = burst
 		} else {
-			log.Printf("WARNING: Invalid INGEST_RATE_LIMIT_BURST value '%s', using default %d", burstStr, DefaultBurstSize)
+			slog.Warn("invalid INGEST_RATE_LIMIT_BURST; using default", "value", s, "default", DefaultBurstSize)
 		}
 	}
-
-	// Parse enabled flag
-	if enabledStr := os.Getenv("INGEST_RATE_LIMIT_ENABLED"); enabledStr != "" {
-		config.Enabled = enabledStr == "true" || enabledStr == "1"
+	if s := os.Getenv("INGEST_RATE_LIMIT_ENABLED"); s != "" {
+		config.Enabled = s == "true" || s == "1"
 	}
-
-	if config.Enabled {
-		log.Printf("Rate limiting ENABLED: %.1f requests/sec, burst=%d", config.RequestsPerSecond, config.BurstSize)
-	} else {
-		log.Printf("WARNING: Rate limiting is DISABLED")
+	if !config.Enabled {
+		slog.Warn("ingest rate limiting is disabled")
 	}
-
 	return config
 }
 
-// TokenBucket implements a simple token bucket rate limiter.
+// TokenBucket implements a token bucket. It is not safe for concurrent use on its
+// own; RateLimiter serializes access.
 type TokenBucket struct {
 	tokens     float64
 	maxTokens  float64
 	refillRate float64 // tokens per second
 	lastRefill time.Time
-	mu         sync.Mutex
+	lastUsed   time.Time
 }
 
-// NewTokenBucket creates a new token bucket with the given parameters.
-func NewTokenBucket(maxTokens float64, refillRate float64) *TokenBucket {
-	return &TokenBucket{
-		tokens:     maxTokens,
-		maxTokens:  maxTokens,
-		refillRate: refillRate,
-		lastRefill: time.Now(),
-	}
-}
-
-// Allow checks if a request is allowed and consumes a token if so.
-func (tb *TokenBucket) Allow() bool {
-	tb.mu.Lock()
-	defer tb.mu.Unlock()
-
-	// Refill tokens based on time elapsed
+// NewTokenBucket creates a full token bucket.
+func NewTokenBucket(maxTokens, refillRate float64) *TokenBucket {
 	now := time.Now()
-	elapsed := now.Sub(tb.lastRefill).Seconds()
-	tb.tokens += elapsed * tb.refillRate
-	if tb.tokens > tb.maxTokens {
-		tb.tokens = tb.maxTokens
-	}
-	tb.lastRefill = now
-
-	// Check if we can consume a token
-	if tb.tokens >= 1.0 {
-		tb.tokens -= 1.0
-		return true
-	}
-	return false
+	return &TokenBucket{tokens: maxTokens, maxTokens: maxTokens, refillRate: refillRate, lastRefill: now, lastUsed: now}
 }
 
-// RateLimiter manages rate limiters per subscription.
+// take consumes a token if available. Otherwise it reports how long until one is.
+func (tb *TokenBucket) take(now time.Time) (bool, time.Duration) {
+	tb.tokens = math.Min(tb.maxTokens, tb.tokens+now.Sub(tb.lastRefill).Seconds()*tb.refillRate)
+	tb.lastRefill = now
+	tb.lastUsed = now
+	if tb.tokens >= 1 {
+		tb.tokens--
+		return true, 0
+	}
+	wait := time.Duration((1 - tb.tokens) / tb.refillRate * float64(time.Second))
+	return false, wait
+}
+
+// Allow reports whether a request may proceed and consumes a token if so.
+func (tb *TokenBucket) Allow() bool {
+	ok, _ := tb.take(time.Now())
+	return ok
+}
+
+// RateLimiter tracks one token bucket per key, bounded in count and idle time.
 type RateLimiter struct {
 	config  RateLimitConfig
+	mu      sync.Mutex
 	buckets map[string]*TokenBucket
-	mu      sync.RWMutex
 }
 
-// NewRateLimiter creates a new rate limiter with the given configuration.
+// NewRateLimiter creates a rate limiter. Call StartJanitor to evict idle buckets.
 func NewRateLimiter(config RateLimitConfig) *RateLimiter {
-	return &RateLimiter{
-		config:  config,
-		buckets: make(map[string]*TokenBucket),
+	if config.IdleTTL <= 0 {
+		config.IdleTTL = DefaultBucketIdleTTL
 	}
+	if config.MaxBuckets <= 0 {
+		config.MaxBuckets = DefaultMaxBuckets
+	}
+	return &RateLimiter{config: config, buckets: make(map[string]*TokenBucket)}
 }
 
-// Allow checks if a request for the given subscription is allowed.
-func (rl *RateLimiter) Allow(subscriptionID string) bool {
+// Allow reports whether a request for key may proceed.
+func (rl *RateLimiter) Allow(key string) bool {
+	ok, _ := rl.allow(key)
+	return ok
+}
+
+// allow returns whether key may proceed and, if not, how long until it may.
+func (rl *RateLimiter) allow(key string) (bool, time.Duration) {
 	if !rl.config.Enabled {
-		return true
+		return true, 0
 	}
-
-	rl.mu.RLock()
-	bucket, exists := rl.buckets[subscriptionID]
-	rl.mu.RUnlock()
-
-	if !exists {
-		rl.mu.Lock()
-		// Double-check after acquiring write lock
-		if bucket, exists = rl.buckets[subscriptionID]; !exists {
-			bucket = NewTokenBucket(float64(rl.config.BurstSize), rl.config.RequestsPerSecond)
-			rl.buckets[subscriptionID] = bucket
+	now := time.Now()
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	b, ok := rl.buckets[key]
+	if !ok {
+		if len(rl.buckets) >= rl.config.MaxBuckets {
+			rl.evictLRULocked()
 		}
-		rl.mu.Unlock()
+		b = NewTokenBucket(float64(rl.config.BurstSize), rl.config.RequestsPerSecond)
+		rl.buckets[key] = b
 	}
-
-	return bucket.Allow()
+	return b.take(now)
 }
 
-// RateLimit returns a middleware that rate limits requests by subscription ID.
-// The subscription ID is expected in the URL parameter "subscription_id".
+// evictLRULocked drops the least recently used bucket. O(n), but only runs when
+// the cap is hit, and n is bounded by MaxBuckets.
+func (rl *RateLimiter) evictLRULocked() {
+	var oldestKey string
+	var oldest time.Time
+	for k, b := range rl.buckets {
+		if oldestKey == "" || b.lastUsed.Before(oldest) {
+			oldestKey, oldest = k, b.lastUsed
+		}
+	}
+	delete(rl.buckets, oldestKey)
+}
+
+// Len returns the number of tracked buckets.
+func (rl *RateLimiter) Len() int {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	return len(rl.buckets)
+}
+
+// Sweep evicts buckets idle since before now-IdleTTL and returns how many it removed.
+func (rl *RateLimiter) Sweep(now time.Time) int {
+	cutoff := now.Add(-rl.config.IdleTTL)
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	n := 0
+	for k, b := range rl.buckets {
+		if b.lastUsed.Before(cutoff) {
+			delete(rl.buckets, k)
+			n++
+		}
+	}
+	return n
+}
+
+// StartJanitor sweeps idle buckets every interval until ctx is done.
+// A non-positive interval defaults to IdleTTL/2.
+func (rl *RateLimiter) StartJanitor(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		interval = rl.config.IdleTTL / 2
+	}
+	go func() {
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case now := <-t.C:
+				rl.Sweep(now)
+			}
+		}
+	}()
+}
+
+// RateLimit rate limits requests by the "subscription_id" URL parameter and sets
+// Retry-After (whole seconds, at least 1) on 429 responses.
 func RateLimit(limiter *RateLimiter) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if limiter == nil || !limiter.config.Enabled {
+		key := c.Param("subscription_id")
+		if limiter == nil || key == "" {
 			c.Next()
 			return
 		}
-
-		subscriptionID := c.Param("subscription_id")
-		if subscriptionID == "" {
-			// No subscription ID, skip rate limiting
-			c.Next()
+		ok, wait := limiter.allow(key)
+		if !ok {
+			secs := max(1, int(math.Ceil(wait.Seconds())))
+			c.Header("Retry-After", strconv.Itoa(secs))
+			AbortWithError(c, http.StatusTooManyRequests, CodeRateLimited, "rate limit exceeded")
 			return
 		}
-
-		if !limiter.Allow(subscriptionID) {
-			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
-				"error":           "rate limit exceeded",
-				"code":            "RATE_LIMIT_EXCEEDED",
-				"subscription_id": subscriptionID,
-				"retry_after":     1, // Suggest retry after 1 second
-			})
-			return
-		}
-
 		c.Next()
 	}
 }
