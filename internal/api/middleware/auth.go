@@ -27,8 +27,9 @@ type AdminAuthConfig struct {
 // LoadAdminAuthConfig reads admin auth settings and fails closed:
 //   - ADMIN_USERNAME + ADMIN_PASSWORD enable Basic Auth (the default and only safe mode).
 //   - ADMIN_AUTH_DISABLED=true turns auth off, with a loud warning.
-//   - Deprecated: ADMIN_AUTH_ENABLED=false is treated like ADMIN_AUTH_DISABLED=true;
-//     ADMIN_AUTH_ENABLED=true is ignored because auth is always on.
+//   - ADMIN_AUTH_ENABLED (the pre-2026 switch) is ignored whatever its value. A
+//     leftover ADMIN_AUTH_ENABLED=false on an old deployment must not silently
+//     keep the console public; turning auth off takes the explicit new variable.
 //
 // It returns ErrAdminCredentialsMissing when auth is on but credentials are missing.
 func LoadAdminAuthConfig(logger *slog.Logger) (AdminAuthConfig, error) {
@@ -36,13 +37,8 @@ func LoadAdminAuthConfig(logger *slog.Logger) (AdminAuthConfig, error) {
 		logger = slog.Default()
 	}
 	disabled := envTrue("ADMIN_AUTH_DISABLED")
-	if v, ok := os.LookupEnv("ADMIN_AUTH_ENABLED"); ok {
-		if envFalseValue(v) {
-			logger.Warn("ADMIN_AUTH_ENABLED=false is deprecated; use ADMIN_AUTH_DISABLED=true")
-			disabled = true
-		} else {
-			logger.Warn("ADMIN_AUTH_ENABLED is deprecated and ignored; admin auth is always on unless ADMIN_AUTH_DISABLED=true")
-		}
+	if _, ok := os.LookupEnv("ADMIN_AUTH_ENABLED"); ok {
+		logger.Warn("ADMIN_AUTH_ENABLED is no longer read and has no effect; remove it. Admin auth is always on unless ADMIN_AUTH_DISABLED=true")
 	}
 	if disabled {
 		logger.Warn("ADMIN AUTH IS DISABLED: every admin API and UI route is open to anyone who can reach this server. Never run like this outside local development.")
@@ -63,14 +59,6 @@ func LoadAdminAuthConfig(logger *slog.Logger) (AdminAuthConfig, error) {
 func envTrue(key string) bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
 	case "1", "true", "yes":
-		return true
-	}
-	return false
-}
-
-func envFalseValue(v string) bool {
-	switch strings.ToLower(strings.TrimSpace(v)) {
-	case "0", "false", "no":
 		return true
 	}
 	return false

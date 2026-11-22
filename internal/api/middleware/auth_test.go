@@ -95,8 +95,10 @@ func TestLoadAdminAuthConfig(t *testing.T) {
 		{name: "only username fails closed", env: map[string]string{"ADMIN_USERNAME": "a"}, wantErr: true},
 		{name: "credentials enable auth", env: map[string]string{"ADMIN_USERNAME": "a", "ADMIN_PASSWORD": "b"}},
 		{name: "explicitly disabled", env: map[string]string{"ADMIN_AUTH_DISABLED": "true"}, wantDisabled: true},
-		{name: "deprecated ENABLED=false disables", env: map[string]string{"ADMIN_AUTH_ENABLED": "false"}, wantDisabled: true},
-		{name: "deprecated ENABLED=true without creds still fails", env: map[string]string{"ADMIN_AUTH_ENABLED": "true"}, wantErr: true},
+		// A leftover ADMIN_AUTH_ENABLED=false from the old deployment must not open the console.
+		{name: "legacy ENABLED=false without creds fails closed", env: map[string]string{"ADMIN_AUTH_ENABLED": "false"}, wantErr: true},
+		{name: "legacy ENABLED=false with creds keeps auth on", env: map[string]string{"ADMIN_AUTH_ENABLED": "false", "ADMIN_USERNAME": "a", "ADMIN_PASSWORD": "b"}},
+		{name: "legacy ENABLED=true without creds fails closed", env: map[string]string{"ADMIN_AUTH_ENABLED": "true"}, wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
